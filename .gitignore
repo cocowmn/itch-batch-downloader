@@ -1,0 +1,15 @@
+.env/
+.idea/
+__pycache__
+build/
+dist/
+upx/
+cookies*
+*.exe
+*.bak
+itch-downloader.ini
+itch-downloader.spec
+.DS_Store
+/Downloads
+/env
+*.xz
