@@ -1,0 +1,8 @@
+<svg viewBox="0 0 500 626" xmlns="http://www.w3.org/2000/svg" fill-rule="evenodd" clip-rule="evenodd"
+    stroke-linejoin="round" stroke-miterlimit="2" role="img" aria-label="Aseprite file">
+    <path d="M458.334 125v458.4H41.667V41.668h333.334v41.666h41.666V125h41.667z" fill="#fff" />
+    <path d="M458.333 250H291.667v-64.667h166.666V250zm19 355.4H22.667v-63.666h454.666v63.667z" fill="#7d929e" />
+    <path
+        d="M375 41.667h-41.667v124.998h125v-41.598H500v500H0V0h375v41.668zm0 0h41.666v41.665H375V41.667zm41.666 41.665h41.667V125h-41.667V83.332zm-83.333 125h-41.667V41.668h-250v541.732h416.667V208.333H375v125h-41.667v-125zm-166.625-41.667v166.668h-41.667V166.665h41.667z"
+        fill="#655561" />
+</svg>

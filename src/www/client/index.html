@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>itch downloads</title>
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <div class="glow glow-a"></div>
+    <div class="glow glow-b"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <span
+          class="brand-mark"
+          data-icon="library-big"
+          title="Hold to sign in as admin"
+        ></span>
+        <span class="brand-name">itch downloads</span>
+        <span class="brand-stats" id="stats"></span>
+      </div>
+
+      <label class="search" for="search">
+        <span data-icon="search"></span>
+        <input
+          id="search"
+          type="search"
+          placeholder="Filter by title, author, tag, file, folder…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button
+          type="button"
+          id="match-case"
+          class="search-toggle"
+          title="Match case"
+          aria-pressed="false"
+        >
+          <span data-icon="case-sensitive"></span>
+        </button>
+        <kbd title="Press / to search">/</kbd>
+      </label>
+
+      <div class="controls">
+        <label class="select">
+          <span data-icon="arrow-up-down"></span>
+          <select id="sort" aria-label="Sort">
+            <option value="title">Title</option>
+            <option value="author">Author</option>
+            <option value="modified">Recently changed</option>
+            <option value="size">Size</option>
+          </select>
+        </label>
+        <fieldset class="segmented" aria-label="View">
+          <button type="button" data-view="grid" title="Grid (1)">
+            <span data-icon="layout-grid"></span>
+          </button>
+          <button type="button" data-view="list" title="List (2)">
+            <span data-icon="list"></span>
+          </button>
+          <button type="button" data-view="gallery" title="Gallery (3)">
+            <span data-icon="gallery-horizontal"></span>
+          </button>
+        </fieldset>
+        <button
+          type="button"
+          class="icon-button"
+          id="show-hidden"
+          title="Show hidden items"
+          aria-pressed="false"
+          hidden
+        >
+          <span data-icon="eye-off"></span>
+        </button>
+        <button
+          type="button"
+          class="icon-button"
+          id="refresh"
+          title="Rescan the download directory"
+        >
+          <span data-icon="refresh-cw"></span>
+        </button>
+      </div>
+    </header>
+
+    <main class="workspace" id="workspace">
+      <section class="results">
+        <div class="results-inner hidden-scrollbar" id="results" aria-live="polite"></div>
+      </section>
+      <aside class="inspector" id="inspector" aria-hidden="true"></aside>
+    </main>
+
+    <script type="module" src="./app.ts"></script>
+  </body>
+</html>
