@@ -1,0 +1,30 @@
+{
+	"name": "itch-batch-downloader",
+	"version": "0.2.0",
+	"description": "Batch download the items bound to your itch.io account, optionally limited to specific bundles or authors.",
+	"license": "GPL-3.0",
+	"type": "module",
+	"private": true,
+	"engines": {
+		"bun": ">=1.4.2"
+	},
+	"scripts": {
+		"start": "bun run src/cli.ts",
+		"build": "bun build --compile src/cli.ts --outfile itch-batch-downloader",
+		"test": "bun test",
+		"typecheck": "bunx tsc --noEmit && bunx tsc --noEmit -p src/www/client",
+		"format": "bunx @biomejs/biome check --write",
+		"format:only": "bunx @biomejs/biome format --write",
+		"lint": "bunx @biomejs/biome lint --write"
+	},
+	"dependencies": {
+		"cheerio": "^1.0.0",
+		"fflate": "^0.8.3",
+		"lucide-static": "^1.44.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.13",
+		"@types/bun": "latest",
+		"typescript": "^5"
+	}
+}
