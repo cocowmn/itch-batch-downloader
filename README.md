@@ -1,643 +1,449 @@
 # itch batch downloader
 
-A Python script that downloads all items bound to your itch.io account in batch.
+A command-line tool, written in TypeScript and run with [Bun](https://bun.com), that downloads the items bound to your itch.io account in batch — the whole library, or just the items from specific bundles or specific authors.
 
 ## The downloader
 
 - Retrieves items currently bound to your itch.io account/library.
+- Optionally limits the run to specific **bundles** and/or specific **authors**.
 - Attempts to download all available files it can access automatically.
 - Optionally captures product pages as PNG and PDF.
-- Downloads embedded videos.
+- Downloads embedded videos (via yt-dlp).
 - Preserves historical versions where possible.
 - Supports interrupting and resuming batch download progress.
 
 The goal of the tool is to create the most complete local archive possible of your itch.io purchases.
 
-This script only downloads items bound to your account and does not bypass itch.io permissions.
-
-## Features
-
-- Batch download of items currently bound to your itch.io account/library.
-- Resume interrupted batch downloads.
-- Skip files that are already identical.
-- Capture product pages as:
-  - PNG screenshot
-  - PDF print
-- Download embedded videos.
-- Preserve older PNG/PDF page captures instead of overwriting them.
-- Filename sanitization is not yet fully implemented.
-- Debug mode for detailed download tracking.
+This tool only downloads items bound to your account and does not bypass itch.io permissions. It never claims bundle items on your behalf.
 
 ## Requirements
 
-- Python 3.9 or newer.
-- Python packages listed in `requirements.txt`.
+- [Bun](https://bun.com) **1.4.2 or newer** (`curl -fsSL https://bun.sh/install | bash`, or `bun upgrade`).
 - Sufficient disk space for your library.
-- Exported itch.io cookies in Netscape cookies.txt format (saved as `cookies-itch.txt`). Note: browser cookies eventually expire. If the downloader suddenly stops seeing your purchases, re-export the cookies from your browser.
+- Your itch.io session cookies saved as `cookies.txt` — either a Netscape-format export or the raw `cookie` header copied from the browser's developer tools. Browser cookies eventually expire: if the downloader reports that you are not authenticated, re-export them.
 
 ### Optional (only needed for some features)
 
-#### [Google Chrome](https://www.google.com/intl/en_us/chrome/)
+#### A Chromium based browser — for `create_png` / `create_pdf`
 
-Required for features that use Selenium browser automation. If Chrome is not installed:
+Page captures use `Bun.WebView`, which drives an installed **Google Chrome, Chromium, Microsoft Edge or Brave** through the DevTools protocol. Bun looks for the browser in the usual install locations and on `PATH`; you can point it at a specific executable with `chrome_path` in the config (or `--chrome-path`, or the `BUN_CHROME_PATH` environment variable).
 
-- Product page PDF snapshots will not be created (`create_pdf`).
-- Product page PNG screenshots will not be created (`create_png`).
+If no browser is found the downloader prints an error, disables captures for the run and keeps downloading files. You can also turn captures off:
 
-The rest of the downloader will still work (library scanning and file downloads).
-
-If Chrome is not available you can disable these features in the configuration file:
-
-```ini
-create_pdf = OFF
-create_png = OFF
+```toml
+create_pdf = false
+create_png = false
 ```
 
-#### [Microsoft Visual C++ Redistributable](https://www.microsoft.com/en-gb/download/details.aspx?id=48145)
+#### [yt-dlp](https://github.com/yt-dlp/yt-dlp) — for `download_videos`
 
-Install the x64 version if you are using 64-bit Python (most systems). This is needed on Windows only.
+Embedded videos (YouTube, Vimeo, …) are downloaded by spawning `yt-dlp`. Install it and make sure it is on `PATH`, or set `yt_dlp_path`. Without it, videos are skipped with a warning.
 
-Some Python packages used by the downloader include native compiled components (for example `cryptography`, `cffi`, and other compiled wheels).
-
-If the runtime is missing on Windows:
-
-- the script may fail to start
-- HTTPS connections used for downloading files may fail
-- some dependencies may fail to import
-
-On most Windows systems this runtime is already installed.
-
-The script has primarily been tested on Windows, but most of the code is cross-platform and may also work on Linux and macOS, although those platforms have been tested less.
+The tool is cross-platform (macOS, Linux, Windows).
 
 ## Usage
 
 ### 1. Login to itch.io
 
-Open: [https://itch.io](https://itch.io)
-
-Log in to your account.
-
-The script requires your authenticated session cookies in order to access your library and download owned content.
+Open [https://itch.io](https://itch.io) and log in to your account. The tool needs your authenticated session cookies to access your library and download owned content.
 
 ### 2. Export your itch.io cookies
 
-Export the cookies for itch.io from your browser and save them to a text file.
+Get your itch.io cookies out of the browser and into a text file. Either of the two routes below works.
 
-Recommended browser extensions:
+#### Option A: browser extension
 
 - [Get cookies.txt LOCALLY](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc) (Chrome / Chromium browsers).
 - [cookies.txt](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/) (Firefox).
 
-Export only itch.io cookies. If you export all cookies it will also work, but it is unsafe from a cybersecurity standpoint.
+With itch.io open, click the extension and export the cookies for the **current site only**. Exporting all cookies also works, but is unsafe from a cybersecurity standpoint.
 
-Save the exported file in the same directory as the script and rename it to:
+#### Option B: developer tools, no extension
 
-```text
-cookies-itch.txt
-```
+itch.io's session cookies are `HttpOnly`, so they cannot be read from the console with `document.cookie` — but the browser shows the cookie header it sends, and the downloader accepts that header as-is:
 
-### 3. Configure the downloader
-
-Edit the configuration file:
+1. Logged in on itch.io, open the developer tools (`F12`, or `⌥⌘I` on macOS), go to the **Network** tab and reload the page.
+2. Click the first request in the list (the `itch.io` document). Under **Headers → Request Headers** find the `cookie` header, right-click its value and choose **Copy value** (Firefox: the "Raw" toggle makes it easy to select the whole line).
+3. Create `cookies.txt` at the project root and paste. The file then contains a single line like
 
 ```text
-itch-batch-downloader.ini
+itchio=...; itchio_token=...; _ga=...
 ```
 
-Set at minimum:
+That is all: when the downloader reads `cookies.txt` it detects this `name=value; name=value` format and converts it internally (binding the cookies to `itch.io` and its subdomains). A leading `cookie:` prefix or line breaks in the pasted text are fine. The `itchio` and `itchio_token` cookies are the ones that matter; extra cookies are harmless.
 
-- the download directory
-- any optional behaviour flags
+#### Either way
 
-If the configuration file does not exist, run the script once and it will be created automatically.
+The cookie file is your login — treat it like a password. It is only ever sent to `itch.io` and its subdomains, and `cookies*` is in `.gitignore`.
 
-The first run will exit after generating the default configuration.
+Save the file in the project directory as:
 
-### 4. Run the script
+```text
+cookies.txt
+```
 
-From the script directory run:
+### 3. Install and configure
 
 ```bash
-python itch-batch-downloader.py
+bun install
+bun start
 ```
 
-or if your system uses `python3`:
+The first run creates `appconfig.toml` next to the script and exits. Edit it (see [Configuration file](#configuration-file)) — at minimum check the download directory — then run again.
+
+### 4. Run
 
 ```bash
-python3 itch-batch-downloader.py
+bun start                     # download everything selected by the config
+bun start --author cool-dev   # ...or narrow the selection from the command line
 ```
 
-If unsure, try the first command.
+Run `bun start --help` for the full list of options.
 
-## What happens when the script runs
+## Commands
 
-Once started the downloader will:
+| Command | What it does |
+|---|---|
+| `download` (default) | Process the selected items. |
+| `list-bundles` | List the bundles bound to your account, with their names and keys. |
+| `list-authors` | List the authors in the current selection with item counts. |
+| `list-games` | List the selected items with the numbers used by the resume file. |
+| `download-browser` | Browse what has been downloaded in a local web UI (see [Browsing your downloads](#browsing-your-downloads)). Works best if you enable downloading cover art and manifests with your content. |
 
-1. Read your configuration file.
-2. Load the cookies from `cookies-itch.txt`.
-3. Connect to itch.io.
-4. Retrieve your library.
-5. Iterate through each owned product.
-6. Download all available files while attempting to avoid duplicates.
-7. Save the files into your configured download directory.
+Every command accepts the same options:
 
-Progress and warnings are printed to the console.
-
-Downloaded files are compared with the online version.
-
-If the files are identical, the download will be skipped.
-
-## Debug mode
-
-You can enable verbose debug output by editing the configuration file and setting:
-
-```ini
-debug_logs = ON
+```text
+  -c, --config <file>       Config file (default: appconfig.toml)
+  -d, --download-dir <dir>  Override download_directory
+      --cookie-file <file>  Override cookie_file
+  -b, --bundle <name|key|url>
+                            Only items of this bundle (repeatable)
+  -a, --author <slug>       Only items by this author (repeatable)
+      --png / --no-png      Enable/disable PNG page captures
+      --pdf / --no-pdf      Enable/disable PDF page captures
+      --files / --no-files  Enable/disable downloading the items' files
+      --artwork / --no-artwork
+                            Enable/disable saving the cover artwork
+      --manifest / --no-manifest
+                            Enable/disable writing <item>_manifest.json
+      --manifest-keys / --no-manifest-keys
+                            Include/omit your download keys in manifests
+      --videos / --no-videos
+                            Enable/disable embedded video downloads
+      --chrome-path <file>  Browser executable used for captures
+      --yt-dlp-path <file>  yt-dlp executable
+      --progress / --no-progress
+                            Show/hide the live download progress bar
+      --log / --no-log      Enable/disable writing downloads.log
+      --dry-run             Resolve the selection and list it, download nothing
+      --restart             Ignore the resume file and start from the first item
+      --skip <n>            Skip the first n items of the selection
+      --port <n>            Port for download-browser (default: 3737)
+      --host <addr>         Interface for download-browser (default: 127.0.0.1;
+                            0.0.0.0 makes it reachable from other devices)
+      --open / --no-open    Open download-browser in the default browser
+      --debug               Verbose logging
 ```
 
-When debug mode is enabled the script prints additional information to the console, including:
+Command-line options override the values in the config file.
 
-- detailed progress information
-- the list of downloads discovered
-- the order in which items will be processed
-- additional diagnostic information useful for troubleshooting
+## Limiting the run to bundles or authors
 
-This can also be used to see the exact download order of your library.
+### By bundle
+
+```bash
+bun start list-bundles                        # find the bundle names / keys you own
+bun start --bundle "Bundle for Ukraine"       # by name (case-insensitive)
+bun start --bundle abc123def                  # by key
+bun start --bundle https://itch.io/bundle/download/abc123def
+```
+
+Or in the config file:
+
+```toml
+bundles = ["Bundle for Ukraine", "abc123def"]
+```
+
+When bundles are selected the tool reads the bundle's own download pages instead of your purchases list, so it does not matter whether the items also appear under [my-purchases](https://itch.io/my-purchases).
+
+**Unclaimed items.** itch.io only lets you download a bundle item after it has been claimed ("added to your library"). The downloader never claims items for you: unclaimed items are skipped and a warning tells you how many there are and where to claim them (`--debug` lists each one). Claim them on the bundle page — the tools mentioned in [Tips and tricks](#tips-and-tricks) can do that in bulk — and run again.
+
+### By author
+
+```bash
+bun start list-authors          # authors in your library, with item counts
+bun start --author cool-dev     # the "cool-dev" in https://cool-dev.itch.io
+```
+
+```toml
+authors = ["cool-dev", "another-author"]
+```
+
+Matching is case-insensitive and also accepts the author's display name as shown on itch.io.
+
+Bundle and author filters combine: `--bundle X --author Y` downloads only Y's items from bundle X.
+
+Use `list-games` (or `--dry-run`) to preview exactly what a selection contains before downloading.
+
+## What happens when the tool runs
+
+1. Read the configuration file and command-line options.
+2. Load the cookies from `cookies.txt`.
+3. Retrieve your library — or the contents of the selected bundles — and apply the author filter.
+4. Iterate through each item:
+   - work out its directory from `download_name` (see [Naming the item directories](#naming-the-item-directories)) and drop a small hidden `.itchio` marker file into it;
+   - download all available files while attempting to avoid duplicates (`download_files`);
+   - capture the product page as PNG / PDF (if enabled);
+   - save the product page's cover artwork as `<item>_cover-artwork.<ext>` (`download_artwork`);
+   - write `<item>_manifest.json` describing the item (`download_manifest`);
+   - download embedded videos (if enabled).
+5. Save everything into `download_directory/<download_name>/`; the generated files (`_cover-artwork`, `_webpage_screenshot_*`, `_manifest.json`, videos) are prefixed with the directory's own name.
+
+Progress and warnings are printed to the console. Files already present with the same size and modification date as the remote file are skipped; changed files are downloaded again and the previous version is kept with an `.old` suffix.
+
+## Naming the item directories
+
+`download_name` decides where each item goes inside `download_directory`. It is a template: `/` creates subdirectories, and `{tokens}` are replaced per item. Every token value is made safe for file names (`/ \ : * ? " < > |` and control characters become `-`, leading/trailing dots are stripped, Windows-reserved names are prefixed, 120 characters max per segment), so a template can never write outside the download directory.
+
+```toml
+download_name = "{slug}"                               # default
+download_name = "{title}"                              # the full name of the project
+download_name = "{author}/{title}"                     # one directory per author
+download_name = "{yyyy}-{mm}-{dd}/{author}--{index}"   # dated run folders
+download_name = "{category}/{author}/{title}"          # Assets/… Game/… Tool/…
+```
+
+| Token | Value |
+|---|---|
+| `{slug}` ★ | The item's itch.io URL slug (`brawlpack` for `penusbmic.itch.io/brawlpack`) |
+| `{title}` ★ | The item's title as shown on itch.io. |
+| `{author}` | Author slug, the `x` in `x.itch.io`. |
+| `{author_name}` | Author display name. |
+| `{bundle}` | Name of the bundle the item was selected from on `--bundle` runs; `library` otherwise. |
+| `{id}` ★ ⁽ᵖ⁾ | Numeric itch.io id. |
+| `{category}` ⁽ᵖ⁾ | `Assets`, `Game`, `Tool`, … |
+| `{tags}` ⁽ᵖ⁾ | Tags, joined with `, ` — or a separator of your choice after a colon: `{tags:--}` → `2D--Pixel Art--Sprites`, `{tags:_}` → `2D_Pixel Art_Sprites`. No trailing separator; `untagged` when there are none. |
+| `{genre}` ⁽ᵖ⁾ | Genres, joined like `{tags}`. |
+| `{published}`, `{updated}` ⁽ᵖ⁾ | Publication / last update date as `yyyy-mm-dd`. |
+| `{index}` ★ | Position of the item in the run, zero-padded to the width of the total (`007`). |
+| `{total}` | Number of items in the run. |
+| `{yyyy}` `{yy}` `{mm}` `{dd}` | Year, two-digit year, month, day the run started. |
+| `{hh}` `{min}` `{ss}` `{ms}` | Hour (24h), minute, second, millisecond the run started. |
+| `{date}` `{time}` | `yyyy-mm-dd` and `hh-min-ss`, same moment. |
+
+★ *identifying* — at least one of these must appear, otherwise the tool refuses to start (all items would end up in the same directory). ⁽ᵖ⁾ *product page* — the item's public page is loaded before its files so these can be resolved; if it cannot be loaded, the item is skipped with an error.
+
+The template is validated at start-up and the tool exits with a message saying what is wrong: empty template, `..`/`.` segments, empty segments (`//`, leading or trailing `/`), absolute paths, `\`, characters that are illegal in file names, unbalanced braces, unknown tokens, a separator on a token that is not a list, or no identifying token. Two things are only warned about: a template without `{title}` or `{slug}` (directories become hard to tell apart) and time or `{index}`/`{total}` tokens (they change between runs, so a re-run downloads into new directories instead of skipping the files it already has). `--dry-run` prints the directory each item would get, and items that would share a directory are reported.
+
+Changing `download_name` does not move anything: the next run downloads into the new locations and the old directories stay.
+
+Every item directory receives a hidden `.itchio` file (JSON: title, slug, author, public page URL, the template used — no keys). It is how the download browser finds items wherever the template put them, how it names items that have no manifest, and where it remembers that an admin hid the item; leave it in place.
 
 ## Download progress tracking
 
-While the script is running, a file named:
+While running, a file named `itch-batch-downloader-track.txt` is kept in the download directory. It records the number of the item currently being processed (plus a fingerprint of the bundle/author selection), which lets the tool resume where it left off after an interruption.
 
-```text
-itch-batch-downloader-track.txt
+- **Restart from the beginning:** run with `--restart`, or delete the file.
+- **Resume from a specific item:** run with `--skip <n>` to skip the first *n* items — if a run of 35 items failed at item 31, `--skip 30` starts at item 31. `bun start list-games` shows the item numbers. (`--skip` overrides the resume file for that run.)
+- If the selection (bundles/authors) changes between runs the index is ignored automatically.
+- A corrupted file is ignored.
+
+## Stopping the tool
+
+Press `CTRL + C`. Fully downloaded files remain on disk; an interrupted download leaves a `.incomplete` file that is overwritten on the next run.
+
+## Manifest files
+
+With `download_manifest` on, every item directory gets a `<item>_manifest.json`, for example:
+
+```json
+{
+  "manifestVersion": 1,
+  "generatedAt": "2026-09-11T06:44:11.192Z",
+  "title": "Sci-fi Character Pack 1",
+  "author": { "slug": "penusbmic", "name": "Penusbmic", "url": "https://penusbmic.itch.io" },
+  "urls": {
+    "page": "https://penusbmic.itch.io/characterpack1",
+    "downloadPage": "https://penusbmic.itch.io/characterpack1/download/KEY"
+  },
+  "downloadKey": "KEY",
+  "directory": "penusbmic/Sci-fi Character Pack 1",
+  "bundles": [{ "name": "Complete Library Bundle", "key": "…", "url": "https://itch.io/bundle/download/…" }],
+  "itchId": 653649,
+  "description": "Contains 1 Free sprite!",
+  "coverImageUrl": "https://img.itch.zone/…/original/ZFXsXs.png",
+  "info": { "Status": "Released", "Category": "Assets", "Genre": "Platformer", "Author": "Penusbmic" },
+  "tags": ["2D", "Pixel Art", "Sprites"],
+  "screenshots": ["https://img.itch.zone/…/original/ZFXsXs.png"],
+  "embeds": [],
+  "files": ["characterpack1_cover-artwork.png", "Sci-fi Character Pack 1.zip"]
+}
 ```
 
-will appear in the same directory as your downloads.
+`bundles` is only filled on bundle-based runs (`--bundle`). `files` is the directory listing at the time of writing, so the manifest is written last for each item. The manifest is overwritten on every run; nothing else is.
 
-This file contains a number representing the download currently being processed.
+**Manifests contain your download keys by default.** `downloadKey`, `urls.downloadPage` and the bundles' `key`/`url` all grant access to the downloads on your account, so treat manifests like `cookies.txt` while `manifest_include_keys = true` — don't share or publish them. Set `manifest_include_keys = false` (or run with `--no-manifest-keys`) to leave all three out; the manifest is then a plain description of the content (title, author, public page URL, tags, bundle *names*, files) that is safe to share. Since manifests are rewritten on every run, a `--no-files --no-png --no-pdf --no-videos --no-manifest-keys` run strips the keys from an existing library.
 
-This mechanism allows the downloader to resume work if it is interrupted.
+## Browsing your downloads
 
-### Restarting from the beginning
-
-If you want to restart downloads from the beginning:
-
-- delete the file `itch-batch-downloader-track.txt`
-
-### Restarting from a specific item
-
-If you want to resume from a specific item:
-
-- open `itch-batch-downloader-track.txt`
-- change the number to the download index you want to start from
-
-You can determine the correct download number by enabling debug mode, which prints the full list of downloads and their order.
-
-If the tracking file becomes corrupted or contains an invalid number, simply delete it to restart from the beginning.
-
-## Stopping the script
-
-The downloader runs continuously until it finishes processing your library.
-
-To stop it manually press:
-
-```text
-CTRL + C
+```bash
+bun start download-browser
 ```
 
-This sends an interrupt signal and safely stops the script.
+starts a small local web app on `http://127.0.0.1:3737/` (opened in your default browser automatically; `--no-open` skips that, `--port` changes the port) that shows everything in `download_directory`:
 
-Any files that were already fully downloaded will remain on disk.
+- **Grid, list and gallery views** — switch with the buttons top right or the `1`, `2`, `3` keys. The gallery view is Finder-style: a large preview with a filmstrip below it, `←`/`→` to move.
+- **A fuzzy filter** — press `/` (or `⌘K` / `Ctrl+K`) and type anything related to an item: title, author, tag, bundle, genre, file name or folder name. Every word has to match somewhere; the list narrows as you type. Clicking a tag or bundle chip in the inspector filters by it.
+- **Sorting** by title, author, last change or size (click a column header in list view to flip the direction).
+- **An inspector** that slides in for the selected item (a full-screen sheet on phones; in the gallery view there, tap *Details*): cover artwork, description, tags, the "More information" panel, the bundle(s) it came from, page captures and the file list. "Open on itch.io" links to the product page.
+- **Download folder** — the item's whole directory as a zip, streamed while it is built (`.incomplete` and hidden files are left out; the manifest goes in without its keys). Zips are limited to 4 GB; above that the button is disabled and the files can be downloaded one by one.
+- **Download from itch.io** — fetches a fresh copy of the item through the downloader (same settings as a CLI run: files, cover, captures, videos, manifest) into a temporary directory on the server and hands it over as a zip; an overlay shows progress and can cancel. It needs the item's download page, which manifests only carry when `manifest_include_keys` is on, and the server needs `cookies.txt`. One download runs at a time; the temporary files are removed after the zip is sent (or after ten minutes). The zip's manifest is always written without keys. Your library on disk is not touched.
+- **Page captures** — the newest capture shows as a strip with chips for the PNG (opens the viewer) and the PDF (opens in a new tab); older captures fold away underneath.
+- **A file browser** — folders expand in place (any depth), and each folder can be *flattened* (the ⋮≡ button on the row, or the one in the section header for all folders) to list everything inside it at once, images first — handy for flipping through a sprite pack. Every row has a download button; the folder button next to it reveals the file in Finder / Explorer (only when the page is opened on the machine running the server).
+- **A viewer** — clicking a file opens it full screen: images on a checkerboard with nearest-neighbour scaling and *Fit / 1× / 2× / 4× / 8×* integer zoom (pixel art stays crisp; toggle to smooth for photos), JSON with highlighting, markdown and text rendered, PDFs, video and audio inline, and a file card with a download button for everything else (archives, `.aseprite`, …). `←`/`→`, the arrows or a swipe move through the files in the order they are listed; `Esc` closes.
 
-Incomplete downloads may remain as partial files depending on the downloader state.
+Items are found through their `.itchio` marker at any depth, so any `download_name` layout works; top-level directories without a marker (downloads from 0.1.x) are listed too. Items with a manifest get the rich information from `<item>_manifest.json`; without one the marker supplies title, author and page link, and directories with neither are listed by their directory and file names, marked *no manifest*. Missing cover artwork is replaced by a placeholder; a later run with `download_artwork = true` fills it in.
+
+The server serves nothing outside the download directory. The refresh button (or reloading the page) rescans the directory, so it can run while a download is in progress. Nothing is written unless an admin hides or deletes an item (below).
+
+### Admin: hiding and deleting items
+
+`appconfig.toml` gets a random `admin_password` when it is created (change it to anything you like, or remove the line to turn the admin features off). **Long-press the library icon** at the left of the top bar to sign in; the session lasts until the tab or the server closes. Signed in, you get:
+
+- **Hide item** in the details panel — a hidden item disappears from the library for everyone else, and its files, zip and "Download from itch.io" stop being served to them. An eye button appears next to refresh to show hidden items (marked with a *hidden* badge); the details panel then offers *Unhide item*.
+- **Delete item** in red at the bottom of the details panel — removes the item's folder from disk after a confirmation. This cannot be undone.
+
+Hiding writes `"hidden": true` into the item's `.itchio` marker (an item from 0.1.x without one gets a marker holding just that flag), so the state moves with the directory and survives a re-download. Five wrong passwords from one address lock it out for 30 seconds; sign-ins and failures are logged.
+
+### Browsing from a phone or another computer
+
+By default the server only listens on the loopback interface. To open it to your network:
+
+```bash
+bun start download-browser --host 0.0.0.0
+```
+
+The startup log lists the addresses other devices can use (`http://192.168.x.x:3737/`). Your download keys never leave the machine: the library data and the `<item>_manifest.json` files are served without `downloadKey`, `urls.downloadPage` and the bundles' keys, and the same goes for the manifests inside zips. Everything else — files, artwork, captures, the zip and "Download from itch.io" — is available to anyone who can reach the port, so keep it to networks you trust. "Reveal in Finder" only appears when the page is opened on the machine that runs the server (the server refuses it from any other address).
+
+## Log file
+
+By default every line printed to the console is also appended to `downloads.log` in the download directory (`create_log = false` or `--no-log` turns this off). Progress bars and pagination dots are not written to the file, and colour codes are stripped, so it is a plain-text record of every run: the command line, the items processed, every file downloaded with its size and speed, captures, and any warnings or errors.
+
+The live download progress bar can be turned off with `log_download_progress = false` (or `--no-progress`); each download then logs one line with its size, one line with the current speed about a second in, and one line on completion. This keeps the console (and the log) readable on long runs.
+
+## Debug mode
+
+Set `debug_logs = true` in the config or pass `--debug` to print every HTTP request, every item discovered, the browser capture details and yt-dlp's output.
 
 ## Tips and tricks
 
-- If you would like to associate free games with your account in batch, you can use tools such as [ItchClaim](https://github.com/Smart123s/ItchClaim).
-
-- If you purchased bundles, you may notice that itch.io does not automatically add all bundle items to your library. Many items remain only inside the bundle purchase page and do not appear under [my-purchases](my-purchases)
-
-  Since the downloader reads items from your library/purchases list, those bundle items need to be added to your account first.
-
-  One convenient way to do this is by using a user script.
-
-  First install a user-script extension such as [Tampermonkey](https://www.tampermonkey.net/):
-
-  - Chrome [version](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=en)
-  - Firefox [version](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/) 
-
-  Then install a script that can automatically bind bundle items to your library, such as:
-
-  - [itch.io bundle to library](https://greasyfork.org/en/scripts/427686-itch-io-bundle-to-library)  
-
-  This script allows you to add all the items from a single bundle page with one click.
-
-  Large bundles (for example 500+ items) may span many pages (around 30 pages), but using the script you can add them page by page with only a fraction of the manual clicks normally required.
-
-  Once items are added to your library, they will appear under [my-purchases](my-purchases) and the downloader will be able to process them.
-
-- I also recently discovered a Chrome extension called [itch.io Bundle Auto Add to Library](https://chromewebstore.google.com/detail/itchio-bundle-auto-add-to/pbolegaohnnpillkpklefebilhanameg) that may automate this process as well, although I cannot guarantee that it works.  
+- To associate free games with your account in batch, tools such as [ItchClaim](https://github.com/Smart123s/ItchClaim) exist.
+- itch.io does not automatically add bundle items to your library; they stay on the bundle page until claimed. With `--bundle` this tool can still see them, but it can only download the ones you have claimed. User scripts such as [itch.io bundle to library](https://greasyfork.org/en/scripts/427686-itch-io-bundle-to-library) (for [Tampermonkey](https://www.tampermonkey.net/)) claim a whole bundle page with one click, and the Chrome extension [itch.io Bundle Auto Add to Library](https://chromewebstore.google.com/detail/itchio-bundle-auto-add-to/pbolegaohnnpillkpklefebilhanameg) may automate it as well.
+- Some adult-only product pages show a confirmation pop-up in captures. Page captures are made with your session cookies, so confirm the warning once in your browser (tick "do not ask again"), re-export the cookies, and the captures will show the actual page.
 
 ## Configuration file
 
-When the script is executed for the first time it automatically creates a configuration file in the same directory as the script:
+The first run creates `appconfig.toml`. A copy of the defaults is in `appconfig.example.toml`:
 
-```text
-itch-batch-downloader.ini
+```toml
+download_directory = "downloads"
+download_name = "{slug}"
+cookie_file = "cookies.txt"
+create_pdf = true
+create_png = true
+download_files = true
+download_artwork = true
+download_manifest = true
+manifest_include_keys = true
+download_videos = true
+debug_logs = false
+log_download_progress = true
+create_log = true
+bundles = []
+authors = []
+# chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# yt_dlp_path = "yt-dlp"
+admin_password = "generated-on-first-run"
 ```
 
-The default content of the file is:
+| Option | Default | Description |
+|---|---|---|
+| `download_directory` | `"downloads"` | Where downloads are stored. Relative paths are resolved from the current directory; absolute paths work too. Created if missing. |
+| `download_name` | `"{slug}"` | Template for each item's directory inside `download_directory`; `/` nests, `{tokens}` are replaced per item — see [Naming the item directories](#naming-the-item-directories). The default keeps the directory names of earlier versions. |
+| `cookie_file` | `"cookies.txt"` | Your itch.io session cookies: a Netscape-format `cookies.txt` export, or the raw `cookie` header value pasted from the developer tools. |
+| `create_pdf` | `true` | Print the product page to PDF next to the downloaded files. Recreated only when the item received new downloads; older captures are kept. |
+| `create_png` | `true` | Full-page PNG screenshot of the product page, same rules as `create_pdf`. |
+| `download_files` | `true` | Download the item's files (the entries of its download page). Turn off to re-run for artwork/captures only. |
+| `download_artwork` | `true` | Save the cover artwork from the product page (`og:image`, original size) as `<item>_cover-artwork.<ext>`. Skipped when a cover file already exists. |
+| `download_manifest` | `true` | Write `<item>_manifest.json` next to the files: title, author, page and download-page URLs, itch.io id, description, cover URL, the "More information" panel (status, category, genre, …), tags, screenshot URLs, embeds, the bundle(s) the item was selected from, and the files in the directory. Refreshed on every run. |
+| `manifest_include_keys` | `true` | Include your download keys in the manifest (`downloadKey`, `urls.downloadPage`, the bundles' `key` and `url`). **Manifests are private files while this is on.** `false` writes a manifest that only describes the content and is safe to share. |
+| `download_videos` | `true` | Download videos embedded in the product page with yt-dlp. Videos with the same id are overwritten. |
+| `debug_logs` | `false` | Verbose logging. |
+| `log_download_progress` | `true` | Live progress bar while downloading. When `false`, one line at the start (size), one with the current speed shortly after, one at completion. |
+| `create_log` | `true` | Append all console output to `<download_directory>/downloads.log`. |
+| `bundles` | `[]` | Bundle names, keys or URLs to limit the run to. Empty = whole library. |
+| `authors` | `[]` | Author slugs (or display names) to limit the run to. Empty = everyone. |
+| `chrome_path` | — | Explicit browser executable for page captures. |
+| `yt_dlp_path` | `"yt-dlp"` | yt-dlp executable. |
+| `admin_password` | random | Unlocks hiding and deleting items in the download browser (long-press the library icon to sign in). A fresh random one is written when the file is created; remove the line to turn the admin features off. |
 
-```ini
-[DEFAULT]
-download_directory = Downloads
-cookie_file = cookies-itch.txt
-create_pdf = ON
-create_png = ON
-download_videos = ON
-debug_logs = OFF
+The legacy `"ON"` / `"OFF"` strings from the old `.ini` file are still accepted for the boolean options.
+
+## Building a standalone executable
+
+Bun can bundle the tool and the runtime into a single binary:
+
+```bash
+bun run build            # produces ./itch-batch-downloader (or .exe on Windows)
+./itch-batch-downloader list-bundles
 ```
 
-These values represent the default behaviour of the downloader.
+Cross-compile with `bun build --compile --target=bun-windows-x64 src/cli.ts --outfile itch-batch-downloader.exe` (see the [Bun docs](https://bun.com/docs/bundler/executables) for the list of targets). The browser and yt-dlp remain external requirements.
 
-Options that use `ON` / `OFF` act as simple switches:
+## Development
 
-- `ON` → feature enabled
-- any value other than `ON` → feature disabled
-
-### download_directory
-
-Default: `Downloads`
-
-This is the directory where all downloaded content will be saved.
-
-If the directory does not exist it will be created automatically in the same location as the script.
-
-You can also specify an absolute path. Example:
-
-```text
-C:\itch Downloads
+```bash
+bun install
+bun test              # unit tests (HTML parsers, cookies, config, filters, resume file, browser)
+bun run typecheck     # tsc --noEmit for the tool and for the browser UI
+bun run format        # biome check --write
 ```
 
-### cookie_file
-
-Default: `cookies-itch.txt`
-
-Specifies the file containing the exported itch.io cookies.
-
-You may provide either:
-
-- just the filename (if it is in the script directory)
-- a full path to the cookie file
-
-### create_pdf
-
-Default: `ON`
-
-When enabled, the script creates a PDF snapshot of the product page alongside the downloaded files.
-
-The script detects changes in the page:
-
-- if the page has not changed, the PDF is not recreated
-- if the page changes, a new PDF is generated
-
-Older versions are renamed and preserved rather than deleted.
-
-Set to any value other than `ON` to disable.
-
-### create_png
-
-Default: `ON`
-
-When enabled, the script captures a PNG screenshot of the product page.
-
-Behaviour is the same as for PDFs:
-
-- screenshots are only recreated if the page changes
-- older versions are renamed and preserved
-
-Set to any value other than `ON` to disable.
-
-### download_videos
-
-Default: `ON`
-
-Downloads videos embedded in the product page.
-
-If the video changes, it will be downloaded again.
-
-Existing videos may be overwritten when a newer version is detected.
-
-Set to any value other than `ON` to disable.
-
-### debug_logs
-
-Default: `OFF`
-
-Enables verbose logging in the console.
-
-This option is useful for troubleshooting or understanding what the script is doing internally.
-
-Set to `ON` to enable detailed debug output.
+The download browser's front end lives in `src/www/client/` (plain TypeScript + CSS, bundled by Bun's HTML import at start-up and into the compiled binary; icons from [Lucide](https://lucide.dev)).
 
 ## Known bugs and caveats
 
-These known limitations may be fixed in the future.
-
-- TODO: currently, there is no filtering by operating system. everything is downloaded.
-- TODO: currently, there is no blacklist for not downloading stuff.
-- TODO: currently, some external links when downloading videos might throw errors as the external domain is not supported (spotify, soundcloud, etc.).
-- TODO: currently, videos in the comments are not downloaded, only the ones in the product page.
-- TODO: currently, videos with the same download link and modified contents get overwritten.
-- TODO: currently, the list of downloads in debug mode won't show an actual download number (you will need to figure out the number by counting the rows).
-- TODO: add proper Python logging and stderr/stdout handling rather than the verbose debug we have at the moment.
-- TODO: add downloads by list, single item or search result (for free items, for example).
-- TODO: add command line options rather than only .ini file.
-- TODO: make the batch process more robust in case of internet not available without risk of flooding itch.io with requests (DNS resolve, cable removed, etc.).
-- TODO: chrome driver installer has a downloader that causes problems when printing to file. Override that.
-- TODO: ability to download screenshots as single images from the product page (example: https://bootdiskrevolution.itch.io/bleed).
-- TODO: html page downloader.
-- TODO: download file names should be sanitized to prevent problems with special characters, unsafe names, and path-related filename collisions.
-- TODO: detect expired cookies and warn the user.
-- TODO: make HTML parsing more resilient to itch.io layout changes.
-- TODO: prevent failures caused by excessively long file paths.
-- BUG: find out why at the end of execution sometimes the following is displayed: `"Press ENTER to exit.^[[?1;0c"` (On Microsoft Windows).
-- BUG: Chrome/Selenium are currently still initialized by the script even if PNG/PDF creation is disabled, so a working Chrome/WebDriver setup may still be required in the current version.
+- No filtering by operating system: every file of an item is downloaded.
+- No blacklist to exclude individual items.
+- Some external links for videos may fail because the host is not supported by yt-dlp (Spotify, SoundCloud, …).
+- Videos in the comments are not downloaded, only those in the product page.
+- Videos with the same id but modified contents get overwritten.
+- Files hosted outside itch.io (Google Drive, Dropbox, …) cannot be downloaded automatically; a warning is printed.
+- Download file names are only lightly sanitized; very long paths may fail on Windows.
+- The itch.io HTML layout may change; the parsers are the most likely thing to break.
+- Screenshots of extremely tall pages are capped at 16384 px.
 
 ## Corner cases to keep in mind for testing
 
-- There may be games which cannot be downloaded, because the developers put them on a dropbox or google drive, though this will be written to stdout as a warning that the script is unable to download it. [This](https://nattwentea.itch.io/deadly-revelation) is an example of that. The issue is that we are not talking about just one simple download but an actual export of Google Sheets files to some other format in some cases.
-- When taking screenshot/creating PDFs, some adult-only products might show a confirmation pop-up mentioning you agree on seeing those contents. It allows for a checkbox "do not ask again". Suggestion: if you are ok with those contents, open an adult-only page, confirm you do not want to see that warning anymore (remember the choice) and export your cookies again. This way this script will work for all the adult-only products and the exported .png/.pdf will be showing the corresponding page contents rather than the pop-up warning. If you do not have an adult-only link handy showing the pop-up, [here](https://xoshdarkheart.itch.io/midnights-kiss) is one, and [here](https://adira.itch.io/tension) another one.
-- Games that were purchased but not yet associated to the account (you will need to associate these manually via itch.io)
-- Download screenshots as single images from the product page. Example: [here](https://bootdiskrevolution.itch.io/bleed).
-
-## How to compile
-
-Prebuilt command-line binaries for Windows and macOS are available in the Releases section.
-
-These are compiled versions of the script and allow you to use the downloader without installing Python.
-
-To use a release binary:
-
-1. Download the archive for your platform.
-2. Extract it.
-3. Open a terminal (Command Prompt / Terminal).
-4. Navigate to the directory containing the executable.
-5. Run the program.
-
-Because the binary is produced with PyInstaller and may also be compressed with UPX, some antivirus software may flag it as suspicious. If you prefer not to run the prebuilt binary, you can compile the tool yourself as described below.
-
-## Build from source
-
-The following instructions create a standalone executable similar to the ones provided in the Releases section.
-
-The process is:
-
-1. Install Python
-2. Create a virtual environment
-3. Install dependencies
-4. (Optional) install UPX
-5. Build the executable
-
-### 1. Install Python
-
-Download [Python](https://www.python.org/downloads/). This project has been tested with Python 3.14.3, but any Python 3.9+ version should work.
-
-#### Windows
-
-Download [link](https://www.python.org/downloads/windows/)
-
-During installation:
-
-- click Install Now
-- enable Add Python to PATH
-- enable Disable path length limit
-
-#### macOS
-
-Install Python using one of the following:
-
-- official installer from python.org
-- Homebrew:
-
-```bash
-brew install python
-```
-
-#### Linux
-
-Install Python from your distribution repository.
-
-Example (Ubuntu / Debian):
-
-```bash
-sudo apt install python3 python3-venv python3-pip
-```
-
-### 2. Create a virtual environment
-
-Navigate to the directory containing the script:
-
-```text
-itch-batch-downloader.py
-```
-
-#### Windows
-
-Open a Command Prompt (no need to run it as Administrator) and execute:
-
-```bat
-py -m pip install --upgrade pip
-py -m venv env
-.\env\Scripts\activate
-```
-
-#### macOS / Linux
-
-```bash
-python3 -m pip install --upgrade pip
-python3 -m venv env
-source env/bin/activate
-```
-
-What these commands do:
-
-1. upgrade pip
-2. create a virtual environment
-3. activate the environment
-
-### 3. Install required packages
-
-Install the dependencies listed in `requirements.txt`:
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Optional: install UPX (Windows only)
-
-UPX is an executable packer/compressor.
-
-In this project it is used to reduce the size of the generated Windows executable.
-
-The program can be built without UPX, so this step is optional.
-
-Download [UPX](https://upx.github.io/). Tested version: [v5.1.1](https://github.com/upx/upx/releases/tag/v5.1.1). Current release was eventually compiled without UPX.
-
-Steps:
-
-1. Download the archive (for example `upx-5.1.1-win64.zip`)
-2. Extract it in the same directory as `itch-batch-downloader.py`
-3. Rename the extracted directory to just:
-
-```text
-upx
-```
-
-The rename matters because the build setup expects the folder to be named `upx` rather than the full version name.
-
-Example:
-
-- original folder: `upx-5.1.1-win64`
-- renamed folder: `upx`
-
-### 5. Build the executable
-
-#### Windows (using the provided build script)
-
-A Windows build script is already included:
-
-```bat
-buildbinary.cmd
-```
-
-Run it from a Command Prompt opened in the same directory as the script:
-
-```bat
-buildbinary.cmd
-```
-
-The script will:
-
-- run PyInstaller
-- produce the standalone `.exe`
-- UPX is disabled
-
-This is the recommended method on Windows.
-
-#### Windows (manual build without the script)
-
-If you prefer to run the build process manually instead of using `buildbinary.cmd`, you can do it directly with PyInstaller. This produces an executable similar to the ones distributed in the Releases section.
-
-First install PyInstaller:
-
-```bash
-pip install pyinstaller
-```
-
-Then run:
-
-```bash
-pyinstaller --onefile itch-batch-downloader.py
-```
-
-The executable will be created inside the `dist` directory.
-
-If UPX is installed and available in the `upx` folder, PyInstaller may automatically use it during the build to reduce the executable size.
-
-#### macOS / Linux
-
-`buildbinary.cmd` is a Windows batch file, so it is not used on macOS or Linux.
-
-Instead build the binary directly with PyInstaller:
-
-```bash
-pip install pyinstaller
-pyinstaller --onefile itch-batch-downloader.py
-```
-
-UPX compression is typically not used on macOS and Linux.
-
-## Updating dependencies (optional)
-
-If you want to upgrade packages inside the virtual environment:
-
-```bash
-pip install -r requirements.txt --upgrade
-```
-
-Note: upgrading dependencies may break compatibility with the tested release.
-
-If problems appear after upgrading, you may need to roll back to the tested versions listed in `requirements.txt`.
-
-## Updating requirements.txt
-
-To regenerate the dependency list:
-
-#### Windows
-
-```bat
-py -m pip freeze > requirements.txt
-```
-
-#### macOS / Linux
-
-```bash
-pip freeze > requirements.txt
-```
-
-## Managing the virtual environment
-
-Deactivate the virtual environment:
-
-```bash
-deactivate
-```
-
-Reactivate it later from the project directory.
-
-#### Windows
-
-```bat
-.\env\Scripts\activate
-```
-
-#### macOS / Linux
-
-```bash
-source env/bin/activate
-```
+- Items whose files live on Google Drive or Dropbox, e.g. [this one](https://nattwentea.itch.io/deadly-revelation).
+- Adult-only pages with a confirmation pop-up, e.g. [here](https://xoshdarkheart.itch.io/midnights-kiss) or [here](https://adira.itch.io/tension).
+- Bundle items purchased but not yet claimed.
+- Items with many screenshots, e.g. [here](https://bootdiskrevolution.itch.io/bleed).
 
 ## FAQ
 
 ### Why are some bundle items missing from the downloader?
 
-The downloader only processes items that appear in your [purchases list](https://itch.io/my-purchases).
-
-If you own a bundle, many items may not automatically be added to your library by itch.io.
-
-Until they are added, they will not appear in your purchases list and the downloader will not see them.
-
-To fix this, make sure all bundle items are added to your library first (for example using the tools mentioned in the Tips and tricks section).
-
-Once they appear under [my-purchases](https://itch.io/my-purchases) the downloader will be able to process them normally.
+Without `--bundle`, the downloader only processes items in your [purchases list](https://itch.io/my-purchases). With `--bundle`, it reads the bundle page but can only download items that have been claimed. Claim the missing items (see [Tips and tricks](#tips-and-tricks)) and run again.
 
 ### Why do some downloads fail or show warnings?
 
-Some projects on itch.io host their downloadable files on external platforms such as:
+Some projects host their files on external platforms (Dropbox, Google Drive, SoundCloud, Spotify, …). Those cannot be automated; download them manually from the project page.
 
-- Dropbox
-- Google Drive
-- SoundCloud
-- Spotify
-- other third-party hosting services
+### "Not properly authenticated"
 
-In these cases the download process may be controlled by the external website and cannot always be automated by the downloader.
-
-When this happens the script usually prints a warning message in the console.
-
-If a file cannot be retrieved automatically, you may need to download it manually from the project page.
+itch.io redirected the request to its login page. Your cookies are missing, expired or for a different account — re-export them.
 
 ## Honourable mention
 
-This script was originally based on https://github.com/shakeyourbunny/itch-downloader with some modifications.
+This project was originally based on https://github.com/shakeyourbunny/itch-downloader with some modifications.
