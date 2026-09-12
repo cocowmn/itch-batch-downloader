@@ -18,6 +18,7 @@
 		"lint": "bunx @biomejs/biome lint --write"
 	},
 	"dependencies": {
+		"@zip.js/zip.js": "2.14.1",
 		"cheerio": "^1.0.0",
 		"fflate": "^0.8.3",
 		"lucide-static": "^1.44.0"

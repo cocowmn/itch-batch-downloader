@@ -26,7 +26,7 @@ import { AdminSessions, HiddenItems } from "./admin.ts";
 import { FetchJobs, JobError } from "./jobs.ts";
 import { scanItemTree, scanLibrary } from "./library.ts";
 import { extractZip, UnzipError } from "./unzip.ts";
-import { ZipTooLargeError, zipDirectory } from "./zip.ts";
+import { zipDirectory } from "./zip.ts";
 
 export interface BrowserOptions {
 	/** Preferred port; falls back to a free one when taken. Default 3737. */
@@ -295,19 +295,12 @@ function listen(ctx: ServerContext) {
 				if (dir instanceof Response) return dir;
 				const { path } = dir;
 				const name = path.split(sep).pop() ?? "item";
-				let stream: ReadableStream<Uint8Array>;
-				try {
-					stream = await zipDirectory(path, {
-						override: (p) =>
-							p.endsWith(MANIFEST_SUFFIX)
-								? redactedManifestBytes(p)
-								: Promise.resolve(null),
-					});
-				} catch (err) {
-					if (err instanceof ZipTooLargeError)
-						return new Response(err.message, { status: 413 });
-					throw err;
-				}
+				const stream = await zipDirectory(path, {
+					override: (p) =>
+						p.endsWith(MANIFEST_SUFFIX)
+							? redactedManifestBytes(p)
+							: Promise.resolve(null),
+				});
 				log.info(`Zipping '${name}' for download`);
 				return new Response(stream, {
 					headers: {

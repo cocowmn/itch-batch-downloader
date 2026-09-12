@@ -1107,21 +1107,16 @@ function renderCaptures(item: LibraryItem): HTMLElement {
 	return wrap;
 }
 
-/** fflate writes 32-bit zips: the server refuses folders above 4 GB. */
-const ZIP_LIMIT = 4 * 1024 ** 3 - 1;
-
 const FETCH_TITLE =
 	"Fetch a fresh copy from itch.io with the downloader's settings and get it as a zip";
 
 /**
  * The two ways to download an item: "Download folder" (the directory
- * streamed as a zip; not above the 4 GB zip limit) and "Download from
- * itch.io" (only with a fetchable manifest). Both possible: one icon button
- * with a chevron that opens a menu of the two. One possible: that one as an
- * icon button. Neither: nothing.
+ * streamed as a zip) and "Download from itch.io" (only with a fetchable
+ * manifest). Both possible: one icon button with a chevron that opens a menu
+ * of the two. Otherwise the folder download as an icon button.
  */
-function downloadButton(item: LibraryItem): HTMLElement | null {
-	const canZip = item.size <= ZIP_LIMIT;
+function downloadButton(item: LibraryItem): HTMLElement {
 	const folderItem: MenuItem = {
 		label: "Download folder",
 		icon: "folder-down",
@@ -1130,7 +1125,7 @@ function downloadButton(item: LibraryItem): HTMLElement | null {
 		href: `/api/zip/${encodePath(item.directory)}`,
 		download: `${item.directory.split("/").pop()}.zip`,
 	};
-	if (canZip && item.fetchable) {
+	if (item.fetchable) {
 		const button = h(
 			"button",
 			{
@@ -1155,33 +1150,17 @@ function downloadButton(item: LibraryItem): HTMLElement | null {
 		);
 		return button;
 	}
-	if (canZip) {
-		return h(
-			"a",
-			{
-				class: "button icon-only",
-				href: folderItem.href,
-				download: folderItem.download,
-				title: `Download the whole folder as a zip (${formatBytes(item.size)})`,
-				"aria-label": "Download folder",
-			},
-			icon("folder-down"),
-		);
-	}
-	if (item.fetchable) {
-		return h(
-			"button",
-			{
-				type: "button",
-				class: "button icon-only",
-				title: FETCH_TITLE,
-				"aria-label": "Download from itch.io",
-				onclick: () => startJob(item),
-			},
-			icon("cloud-download"),
-		);
-	}
-	return null;
+	return h(
+		"a",
+		{
+			class: "button icon-only",
+			href: folderItem.href,
+			download: folderItem.download,
+			title: `Download the whole folder as a zip (${formatBytes(item.size)})`,
+			"aria-label": "Download folder",
+		},
+		icon("folder-down"),
+	);
 }
 
 // Unzipping (admin) --------------------------------------------------------

@@ -3,12 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unzipSync } from "fflate";
-import {
-	defaultExclude,
-	ZIP_LIMIT,
-	ZipTooLargeError,
-	zipDirectory,
-} from "../src/www/server/zip.ts";
+import { defaultExclude, zipDirectory } from "../src/www/server/zip.ts";
 
 async function collect(
 	stream: ReadableStream<Uint8Array>,
@@ -96,21 +91,57 @@ describe("zipDirectory", () => {
 		}
 	});
 
-	test("refuses folders over the 32-bit limit before streaming", async () => {
+	test("small archives stay classic 32-bit zips", async () => {
 		const root = await mkdtemp(join(tmpdir(), "itch-zip-"));
 		try {
-			// a sparse file costs no disk space but reports its full size
-			const big = join(root, "item", "huge.bin");
-			await mkdir(join(root, "item"));
-			const proc = Bun.spawn(["truncate", "-s", String(ZIP_LIMIT + 1), big]);
-			await proc.exited;
-			await expect(zipDirectory(join(root, "item"))).rejects.toBeInstanceOf(
-				ZipTooLargeError,
-			);
+			await Bun.write(join(root, "item", "a.txt"), "aaa");
+			const bytes = await collect(await zipDirectory(join(root, "item")));
+			// no Zip64 end-of-central-directory record (PK\x06\x06)
+			expect(
+				Buffer.from(bytes).indexOf(Buffer.from("PK\x06\x06", "latin1")),
+			).toBe(-1);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
 	});
+
+	test("an entry over 4 GiB is written with Zip64 records", async () => {
+		// A sparse file costs no disk space but streams its full size: stored,
+		// so the zip is a little over 4 GiB and can be checked without
+		// materialising it (the test counts bytes and keeps the tail).
+		const root = await mkdtemp(join(tmpdir(), "itch-zip-"));
+		try {
+			const size = 4 * 1024 ** 3 + 1024;
+			await mkdir(join(root, "item"));
+			const proc = Bun.spawn([
+				"truncate",
+				"-s",
+				String(size),
+				join(root, "item", "huge.zip"),
+			]);
+			await proc.exited;
+			let total = 0;
+			let tail = new Uint8Array(0);
+			for await (const chunk of await zipDirectory(join(root, "item"))) {
+				total += chunk.length;
+				const joined = new Uint8Array(tail.length + chunk.length);
+				joined.set(tail);
+				joined.set(chunk, tail.length);
+				tail = joined.subarray(Math.max(0, joined.length - 4096));
+			}
+			expect(total).toBeGreaterThan(size);
+			const buf = Buffer.from(tail);
+			// Zip64 end of central directory record + locator, then the
+			// classic EOCD with 0xffffffff placeholders.
+			expect(buf.indexOf(Buffer.from("PK\x06\x06", "latin1"))).not.toBe(-1);
+			expect(buf.indexOf(Buffer.from("PK\x06\x07", "latin1"))).not.toBe(-1);
+			const eocd = buf.lastIndexOf(Buffer.from("PK\x05\x06", "latin1"));
+			expect(eocd).not.toBe(-1);
+			expect(buf.readUInt32LE(eocd + 16)).toBe(0xffffffff);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	}, 120_000);
 
 	test("cancelling the stream stops reading", async () => {
 		const root = await mkdtemp(join(tmpdir(), "itch-zip-"));

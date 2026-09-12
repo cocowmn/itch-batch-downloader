@@ -1,18 +1,16 @@
 // Stream a directory as a zip archive for the download browser. Pure JS via
-// fflate, so it works everywhere the compiled binary runs; already-compressed
-// kinds are stored as they are, everything else is deflated.
+// zip.js, so it works everywhere the compiled binary runs; already-compressed
+// kinds are stored as they are, everything else is deflated. Entries and
+// archives past 4 GiB (or 65535 entries) get Zip64 records automatically,
+// so there is no size limit beyond what the client is willing to download.
 
 import { readdir, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import { Zip, ZipDeflate, ZipPassThrough } from "fflate";
+import { configure, ZipWriter } from "@zip.js/zip.js";
 
-/**
- * fflate writes 32-bit sizes and offsets (no Zip64): archives and entries
- * must stay below 4 GiB.
- */
-export const ZIP_LIMIT = 4 * 1024 ** 3 - 1;
-
-export class ZipTooLargeError extends Error {}
+// No worker threads: the compiled binary cannot ship zip.js's worker script,
+// and deflate goes through Bun's native CompressionStream anyway.
+configure({ useWebWorkers: false });
 
 /** Compressing these again gains nothing: store them. */
 const STORED = new Set([
@@ -118,8 +116,7 @@ export async function zipSize(
 /**
  * Zip `dir` (as `<rootName>/...`) into a byte stream. The archive is written
  * as files are read, with backpressure from the consumer; cancelling the
- * stream stops the work. Throws `ZipTooLargeError` before any output when
- * the content cannot fit in a 32-bit zip.
+ * stream stops the work.
  */
 export async function zipDirectory(
 	dir: string,
@@ -128,86 +125,43 @@ export async function zipDirectory(
 	const root = opts.rootName ?? basename(dir);
 	const entries: Entry[] = [];
 	await collect(dir, `${root}/`, opts.exclude ?? defaultExclude, entries);
-	const total = entries.reduce((acc, e) => acc + e.size, 0);
-	if (total > ZIP_LIMIT || entries.some((e) => e.size > ZIP_LIMIT))
-		throw new ZipTooLargeError(
-			`The folder is ${(total / 1024 ** 3).toFixed(1)} GB; zips are limited to 4 GB.`,
-		);
 
-	let cancelled = false;
-	let wake: (() => void) | null = null;
-	return new ReadableStream<Uint8Array>(
-		{
-			start(controller) {
-				const zip = new Zip((err, chunk, final) => {
-					if (cancelled) return;
-					if (err) {
-						controller.error(err);
-						cancelled = true;
-						return;
-					}
-					controller.enqueue(chunk);
-					if (final) controller.close();
-				});
-				const waitForRoom = async () => {
-					while (!cancelled && (controller.desiredSize ?? 1) <= 0) {
-						await new Promise<void>((resolve) => {
-							wake = resolve;
-						});
-					}
-				};
-				const pump = async () => {
-					for (const entry of entries) {
-						if (cancelled) return;
-						const ext = extname(entry.name).slice(1).toLowerCase();
-						const file =
-							entry.directory || STORED.has(ext)
-								? new ZipPassThrough(entry.name)
-								: new ZipDeflate(entry.name, { level: 6 });
-						file.mtime = entry.mtime;
-						zip.add(file);
-						if (entry.directory) {
-							file.push(new Uint8Array(0), true);
-							continue;
-						}
-						const replaced = opts.override
-							? await opts.override(entry.path)
-							: null;
-						if (replaced) {
-							file.push(replaced, true);
-							await waitForRoom();
-							continue;
-						}
-						const reader = Bun.file(entry.path).stream().getReader();
-						try {
-							for (;;) {
-								const { value, done } = await reader.read();
-								if (cancelled) return;
-								if (done) break;
-								file.push(value);
-								await waitForRoom();
-							}
-						} finally {
-							reader.releaseLock();
-						}
-						file.push(new Uint8Array(0), true);
-					}
-					zip.end();
-				};
-				pump().catch((err) => {
-					if (!cancelled) controller.error(err);
-					cancelled = true;
-				});
-			},
-			pull() {
-				wake?.();
-				wake = null;
-			},
-			cancel() {
-				cancelled = true;
-				wake?.();
-			},
-		},
+	// zip.js writes into the writable side; the readable side is the response.
+	// The queue is sized in bytes so a slow client stalls the reads, not RAM.
+	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>(
+		{},
 		{ highWaterMark: 4 * 1024 * 1024, size: (chunk) => chunk?.byteLength ?? 0 },
+		{ highWaterMark: 0 },
 	);
+	const zip = new ZipWriter(writable, { dataDescriptor: true });
+	const pump = async () => {
+		for (const entry of entries) {
+			if (entry.directory) {
+				await zip.add(entry.name, undefined, {
+					directory: true,
+					lastModDate: entry.mtime,
+				});
+				continue;
+			}
+			const ext = extname(entry.name).slice(1).toLowerCase();
+			const options = {
+				lastModDate: entry.mtime,
+				level: STORED.has(ext) ? 0 : 6,
+			};
+			const replaced = opts.override ? await opts.override(entry.path) : null;
+			// The size hint lets zip.js keep 32-bit records for small entries.
+			const reader = replaced
+				? { readable: new Blob([replaced]).stream(), size: replaced.byteLength }
+				: { readable: Bun.file(entry.path).stream(), size: entry.size };
+			await zip.add(entry.name, reader, options);
+		}
+		await zip.close();
+	};
+	pump().catch((err) => {
+		// A cancelled response already errored the writable; anything else
+		// (an unreadable file, a mid-way failure) errors it here so the
+		// consumer sees a broken stream rather than a truncated zip.
+		writable.abort(err).catch(() => {});
+	});
+	return readable;
 }
