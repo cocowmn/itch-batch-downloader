@@ -108,7 +108,7 @@ Run `bun start --help` for the full list of options.
 | `list-bundles` | List the bundles bound to your account, with their names and keys. |
 | `list-authors` | List the authors in the current selection with item counts. |
 | `list-products` | List the selected items with the numbers used by the resume file. |
-| `download-browser` | Browse what has been downloaded in a local web UI (see [Browsing your downloads](#browsing-your-downloads)). Works best if you enable downloading cover art and manifests with your content. |
+| `browser` | Browse what has been downloaded in a local web UI (see [Browsing your downloads](#browsing-your-downloads)). Works best if you enable downloading cover art and manifests with your content. |
 
 Every command accepts the same options:
 
@@ -140,11 +140,11 @@ Every command accepts the same options:
       --dry-run             Resolve the selection and list it, download nothing
       --restart             Ignore the resume file and start from the first item
       --skip <n>            Skip the first n items of the selection
-      --port <n>            Port for download-browser (default: 3737)
-      --host [addr]         Interface for download-browser (default: 127.0.0.1;
+      --port <n>            Port for browser (default: 3737)
+      --host [addr]         Interface for browser (default: 127.0.0.1;
                             a bare --host listens on 0.0.0.0, reachable from
                             other devices)
-      --open / --no-open    Open download-browser in the default browser
+      --open / --no-open    Open the browser UI in your default browser
       --debug               Verbose logging
 ```
 
@@ -310,7 +310,7 @@ With `download_manifest` on, every item directory gets a `<item>_manifest.json`,
 ## Browsing your downloads
 
 ```bash
-bun start download-browser
+bun start browser
 ```
 
 starts a small local web app on `http://127.0.0.1:3737/` (opened in your default browser automatically; `--no-open` skips that, `--port` changes the port) that shows everything in `download_directory`:
@@ -345,7 +345,7 @@ Hiding writes `"hidden": true` into the item's `.itchio` marker (an item from 0.
 By default the server only listens on the loopback interface. To open it to your network:
 
 ```bash
-bun start download-browser --host
+bun start browser --host
 ```
 
 A bare `--host` listens on every interface (`0.0.0.0`); pass an address (`--host 10.0.0.5`) to pick one. The startup log lists the addresses other devices can use (`http://192.168.x.x:3737/`). Your download keys never leave the machine: the library data and the `<item>_manifest.json` files are served without `downloadKey`, `urls.downloadPage` and the bundles' keys, and the same goes for the manifests inside zips. Everything else — files, artwork, captures, the zip and "Download from itch.io" — is available to anyone who can reach the port, so keep it to networks you trust. "Reveal in Finder" only appears when the page is opened on the machine that runs the server (the server refuses it from any other address).

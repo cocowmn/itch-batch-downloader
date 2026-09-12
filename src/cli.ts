@@ -28,8 +28,7 @@ Commands:
   list-bundles    List the bundles bound to this account
   list-authors    List the authors in the selection with item counts
   list-products   List the selected items with their resume numbers
-  download-browser
-                  Browse what has been downloaded in a local web UI
+  browser         Browse what has been downloaded in a local web UI
 
 Options:
   -c, --config <file>       Config file (default: ${DEFAULT_CONFIG_FILE})
@@ -61,11 +60,11 @@ Options:
       --dry-run             Resolve the selection and list it, download nothing
       --restart             Ignore the resume file and start from the first item
       --skip <n>            Skip the first n items of the selection
-      --port <n>            Port for download-browser (default: ${DEFAULT_PORT})
-      --host [addr]         Interface for download-browser (default: 127.0.0.1;
+      --port <n>            Port for browser (default: ${DEFAULT_PORT})
+      --host [addr]         Interface for browser (default: 127.0.0.1;
                             a bare --host listens on 0.0.0.0, reachable from
                             other devices)
-      --open / --no-open    Open download-browser in the default browser
+      --open / --no-open    Open the download browser UI in your default browser
       --debug               Verbose logging
   -h, --help                Show this help
   -V, --version             Show version
@@ -274,7 +273,7 @@ async function main(): Promise<number> {
 		case "list-products":
 			await listProducts(config);
 			break;
-		case "download-browser":
+		case "browser":
 			await serveDownloadBrowser(config, {
 				port: cli.port,
 				host: cli.host,

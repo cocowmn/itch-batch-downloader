@@ -1,6 +1,6 @@
 # The download browser
 
-`bun start download-browser` turns the folder the downloader fills into a small web app: a library of everything you have pulled from itch.io, with cover art, the product page's description, tags and bundles, a file browser that opens straight into a viewer, and (signed in as admin) the tools to tidy the collection up. It runs on your machine, reads the download directory as it is on disk, and never sends your download keys anywhere.
+`bun start browser` turns the folder the downloader fills into a small web app: a library of everything you have pulled from itch.io, with cover art, the product page's description, tags and bundles, a file browser that opens straight into a viewer, and (signed in as admin) the tools to tidy the collection up. It runs on your machine, reads the download directory as it is on disk, and never sends your download keys anywhere.
 
 This page is a tour; the [README](../README.md#browsing-your-downloads) has the reference.
 
