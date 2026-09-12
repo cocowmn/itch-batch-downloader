@@ -62,17 +62,33 @@ Options:
       --restart             Ignore the resume file and start from the first item
       --skip <n>            Skip the first n items of the selection
       --port <n>            Port for download-browser (default: ${DEFAULT_PORT})
-      --host <addr>         Interface for download-browser (default: 127.0.0.1;
-                            0.0.0.0 makes it reachable from other devices)
+      --host [addr]         Interface for download-browser (default: 127.0.0.1;
+                            a bare --host listens on 0.0.0.0, reachable from
+                            other devices)
       --open / --no-open    Open download-browser in the default browser
       --debug               Verbose logging
   -h, --help                Show this help
   -V, --version             Show version
 `;
 
+/**
+ * parseArgs has no optional option-arguments, so a bare `--host` (nothing
+ * after it, or another flag) is rewritten to `--host=0.0.0.0` first, like
+ * the dev servers that treat `--host` alone as "listen on every interface".
+ */
+function expandBareHost(argv: string[]): string[] {
+	return argv.flatMap((arg, i) => {
+		if (arg !== "--host") return [arg];
+		const next = argv[i + 1];
+		return next === undefined || next.startsWith("-")
+			? ["--host=0.0.0.0"]
+			: [arg];
+	});
+}
+
 function parseCli(argv: string[]) {
 	const { values, positionals } = parseArgs({
-		args: argv,
+		args: expandBareHost(argv),
 		allowPositionals: true,
 		allowNegative: true,
 		options: {

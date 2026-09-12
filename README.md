@@ -141,8 +141,9 @@ Every command accepts the same options:
       --restart             Ignore the resume file and start from the first item
       --skip <n>            Skip the first n items of the selection
       --port <n>            Port for download-browser (default: 3737)
-      --host <addr>         Interface for download-browser (default: 127.0.0.1;
-                            0.0.0.0 makes it reachable from other devices)
+      --host [addr]         Interface for download-browser (default: 127.0.0.1;
+                            a bare --host listens on 0.0.0.0, reachable from
+                            other devices)
       --open / --no-open    Open download-browser in the default browser
       --debug               Verbose logging
 ```
@@ -343,10 +344,10 @@ Hiding writes `"hidden": true` into the item's `.itchio` marker (an item from 0.
 By default the server only listens on the loopback interface. To open it to your network:
 
 ```bash
-bun start download-browser --host 0.0.0.0
+bun start download-browser --host
 ```
 
-The startup log lists the addresses other devices can use (`http://192.168.x.x:3737/`). Your download keys never leave the machine: the library data and the `<item>_manifest.json` files are served without `downloadKey`, `urls.downloadPage` and the bundles' keys, and the same goes for the manifests inside zips. Everything else — files, artwork, captures, the zip and "Download from itch.io" — is available to anyone who can reach the port, so keep it to networks you trust. "Reveal in Finder" only appears when the page is opened on the machine that runs the server (the server refuses it from any other address).
+A bare `--host` listens on every interface (`0.0.0.0`); pass an address (`--host 10.0.0.5`) to pick one. The startup log lists the addresses other devices can use (`http://192.168.x.x:3737/`). Your download keys never leave the machine: the library data and the `<item>_manifest.json` files are served without `downloadKey`, `urls.downloadPage` and the bundles' keys, and the same goes for the manifests inside zips. Everything else — files, artwork, captures, the zip and "Download from itch.io" — is available to anyone who can reach the port, so keep it to networks you trust. "Reveal in Finder" only appears when the page is opened on the machine that runs the server (the server refuses it from any other address).
 
 ## Log file
 
