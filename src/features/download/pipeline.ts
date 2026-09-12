@@ -4,7 +4,7 @@
 import { mkdir, rename, stat, unlink } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { Config } from "../../models/config.ts";
-import type { Game } from "../../models/game.ts";
+import type { Product } from "../../models/product.ts";
 import { isAbortError, throwIfAborted } from "../../utils/abort.ts";
 import { log } from "../../utils/log.ts";
 import { withRetries } from "../../utils/retry.ts";
@@ -32,7 +32,7 @@ import {
 import {
 	reportUnclaimed,
 	type Selection,
-	selectGames,
+	selectProducts,
 } from "../selection/selection.ts";
 import { VideoDownloader } from "../videos/videos.ts";
 import { selectionFingerprint, Tracker } from "./tracker.ts";
@@ -51,7 +51,7 @@ export const LOG_FILE = "downloads.log";
 export interface ItemContext {
 	client: ItchClient;
 	config: Config;
-	game: Game;
+	product: Product;
 	/** 1-based position in the selection, and its size (for `{index}`/`{total}`). */
 	index: number;
 	total: number;
@@ -79,20 +79,20 @@ export async function run(
 	const runStarted = new Date();
 	const client = await createClient(config);
 
-	const selection = await selectGames(client, config);
-	const games = selection.games;
-	log.info(`${games.length} items found.`);
+	const selection = await selectProducts(client, config);
+	const products = selection.products;
+	log.info(`${products.length} items found.`);
 	reportUnclaimed(selection.unclaimed);
-	warnAboutCollisions(name, games, runStarted);
+	warnAboutCollisions(name, products, runStarted);
 
 	if (opts.dryRun) {
-		printGameList(selection, name, runStarted);
+		printProductList(selection, name, runStarted);
 		return;
 	}
 
 	const tracker = new Tracker(
 		config.download_directory,
-		selectionFingerprint(config.bundles, config.authors),
+		selectionFingerprint(config.bundles, config.authors, config.products),
 	);
 	if (opts.restart) await tracker.reset();
 	let resumeFrom = await tracker.load();
@@ -117,21 +117,21 @@ export async function run(
 		: null;
 
 	try {
-		for (const [i, game] of games.entries()) {
+		for (const [i, product] of products.entries()) {
 			const number = i + 1;
 			if (number < resumeFrom) continue;
 
 			log.raw();
 			log.info(
-				`Analysing item ${number} of ${games.length}. Title: ${game.slug}`,
+				`Analysing item ${number} of ${products.length}. Title: ${product.slug}`,
 			);
 			await tracker.save(number);
 			await processItem({
 				client,
 				config,
-				game,
+				product,
 				index: number,
-				total: games.length,
+				total: products.length,
 				runStarted,
 				name,
 				capturer,
@@ -155,7 +155,7 @@ export async function processItem(ctx: ItemContext): Promise<string | null> {
 	const {
 		client,
 		config,
-		game,
+		product,
 		index,
 		total,
 		runStarted,
@@ -176,10 +176,10 @@ export async function processItem(ctx: ItemContext): Promise<string | null> {
 		videos
 	) {
 		try {
-			productPage = await fetchProductPage(client, game.gameUrl);
+			productPage = await fetchProductPage(client, product.productUrl);
 		} catch (err) {
 			if (isAbortError(err)) throw err;
-			log.error(`Could not load product page ${game.gameUrl}`, err);
+			log.error(`Could not load product page ${product.productUrl}`, err);
 		}
 	}
 
@@ -187,7 +187,7 @@ export async function processItem(ctx: ItemContext): Promise<string | null> {
 	let relativeDir: string;
 	try {
 		relativeDir = resolveDownloadName(name, {
-			game,
+			product,
 			index,
 			total,
 			runStarted,
@@ -201,20 +201,25 @@ export async function processItem(ctx: ItemContext): Promise<string | null> {
 		log.error(`Skipping item: ${err.message}`);
 		return null;
 	}
-	const gameDir = join(downloadDir, relativeDir);
+	const productDir = join(downloadDir, relativeDir);
 	// Generated files (cover, captures, manifest, videos) share this prefix.
 	const prefix = basename(relativeDir);
 	log.info(`Saving to ${relativeDir}`);
-	await mkdir(gameDir, { recursive: true });
-	await writeMarker(gameDir, game, name.source);
+	await mkdir(productDir, { recursive: true });
+	await writeMarker(productDir, product, name.source);
 
 	let newDownloads = false;
 	if (config.download_files) {
 		try {
-			newDownloads = await downloadGameFiles(client, config, game, gameDir);
+			newDownloads = await downloadProductFiles(
+				client,
+				config,
+				product,
+				productDir,
+			);
 		} catch (err) {
 			if (isAbortError(err)) throw err;
-			log.error(`Could not process download page ${game.dlurl}`, err);
+			log.error(`Could not process download page ${product.dlurl}`, err);
 		}
 	} else {
 		log.info("File downloads disabled as config setting is false");
@@ -225,15 +230,15 @@ export async function processItem(ctx: ItemContext): Promise<string | null> {
 			await downloadCoverArtwork(
 				client,
 				productPage,
-				game.gameUrl,
-				gameDir,
+				product.productUrl,
+				productDir,
 				prefix,
 				config.log_download_progress,
 			);
 		} catch (err) {
 			if (isAbortError(err)) throw err;
 			log.error(
-				`Error while downloading cover artwork for ${game.gameUrl}`,
+				`Error while downloading cover artwork for ${product.productUrl}`,
 				err,
 			);
 		}
@@ -243,17 +248,26 @@ export async function processItem(ctx: ItemContext): Promise<string | null> {
 
 	throwIfAborted(signal);
 	if (capturer.enabled) {
-		await capturer.capture(game.gameUrl, gameDir, prefix, newDownloads, signal);
+		await capturer.capture(
+			product.productUrl,
+			productDir,
+			prefix,
+			newDownloads,
+			signal,
+		);
 	} else if (!config.create_png && !config.create_pdf) {
 		log.info("Screenshot/PDF creation disabled as config setting is false");
 	}
 
 	if (videos && productPage !== null) {
 		try {
-			await videos.download(productPage, gameDir, prefix, signal);
+			await videos.download(productPage, productDir, prefix, signal);
 		} catch (err) {
 			if (isAbortError(err)) throw err;
-			log.error(`Error while downloading videos for ${game.gameUrl}`, err);
+			log.error(
+				`Error while downloading videos for ${product.productUrl}`,
+				err,
+			);
 		}
 	} else if (!videos) {
 		log.info("Video downloads disabled as config setting is false");
@@ -263,7 +277,7 @@ export async function processItem(ctx: ItemContext): Promise<string | null> {
 	throwIfAborted(signal);
 	if (config.download_manifest && productPage !== null) {
 		try {
-			const path = await writeManifest(game, productPage, gameDir, {
+			const path = await writeManifest(product, productPage, productDir, {
 				includeKeys: config.manifest_include_keys,
 				directory: relativeDir,
 				prefix,
@@ -271,7 +285,7 @@ export async function processItem(ctx: ItemContext): Promise<string | null> {
 			log.info(`Manifest written: ${path}`);
 		} catch (err) {
 			if (isAbortError(err)) throw err;
-			log.error(`Error while writing manifest for ${game.gameUrl}`, err);
+			log.error(`Error while writing manifest for ${product.productUrl}`, err);
 		}
 	} else if (!config.download_manifest) {
 		log.info("Manifest creation disabled as config setting is false");
@@ -281,10 +295,10 @@ export async function processItem(ctx: ItemContext): Promise<string | null> {
 
 async function fetchProductPage(
 	client: ItchClient,
-	gameUrl: string,
+	productUrl: string,
 ): Promise<string> {
-	log.debug(`Downloading page: ${gameUrl}`);
-	const res = await client.get(gameUrl);
+	log.debug(`Downloading page: ${productUrl}`);
+	const res = await client.get(productUrl);
 	log.debug(`Got back response: ${res.status}`);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	const html = await res.text();
@@ -298,25 +312,25 @@ async function fetchProductPage(
  */
 function previewDirectory(
 	name: DownloadName,
-	game: Game,
+	product: Product,
 	index: number,
 	total: number,
 	runStarted: Date,
 ): string | null {
 	if (name.needsPage) return null;
-	return resolveDownloadName(name, { game, index, total, runStarted });
+	return resolveDownloadName(name, { product, index, total, runStarted });
 }
 
 /** Items that resolve to the same directory would be mixed together. */
 function warnAboutCollisions(
 	name: DownloadName,
-	games: Game[],
+	products: Product[],
 	runStarted: Date,
 ): void {
 	if (name.needsPage) return;
 	const byDir = new Map<string, string[]>();
-	for (const [i, g] of games.entries()) {
-		const dir = previewDirectory(name, g, i + 1, games.length, runStarted);
+	for (const [i, g] of products.entries()) {
+		const dir = previewDirectory(name, g, i + 1, products.length, runStarted);
 		if (dir === null) return;
 		byDir.set(dir, [...(byDir.get(dir) ?? []), g.title]);
 	}
@@ -330,14 +344,14 @@ function warnAboutCollisions(
 }
 
 /** Print the resolved item list with the numbers used by the resume file. */
-export function printGameList(
+export function printProductList(
 	selection: Selection,
 	name?: DownloadName,
 	runStarted = new Date(),
 ): void {
-	const total = selection.games.length;
+	const total = selection.products.length;
 	const width = String(total).length;
-	for (const [i, g] of selection.games.entries()) {
+	for (const [i, g] of selection.products.entries()) {
 		const dir = name
 			? previewDirectory(name, g, i + 1, total, runStarted)
 			: null;
@@ -356,30 +370,32 @@ export function printGameList(
  * Download every file listed on the item's download page.
  * Returns true when at least one file was (re)downloaded.
  */
-async function downloadGameFiles(
+async function downloadProductFiles(
 	client: ItchClient,
 	config: Config,
-	game: Game,
-	gameDir: string,
+	product: Product,
+	productDir: string,
 ): Promise<boolean> {
-	const res = await client.get(game.dlurl);
+	const res = await client.get(product.dlurl);
 	if (res.status !== 200) {
-		log.error(`Could not access download page ${game.dlurl} [${res.status}]`);
+		log.error(
+			`Could not access download page ${product.dlurl} [${res.status}]`,
+		);
 		return false;
 	}
 	const page = parseDownloadPage(await res.text());
 	let newDownloads = false;
 	for (const upload of page.uploads) {
 		log.debug(
-			`fetch_upload - upload: ${JSON.stringify(upload)}. gameUrl: ${game.gameUrl}. key: ${game.key}. gamedirectory: ${game.itchSlug}`,
+			`fetch_upload - upload: ${JSON.stringify(upload)}. productUrl: ${product.productUrl}. key: ${product.key}. directory: ${product.itchSlug}`,
 		);
 		const downloaded = await fetchUpload(
 			client,
 			config,
-			game,
+			product,
 			page,
 			upload,
-			gameDir,
+			productDir,
 		);
 		newDownloads ||= downloaded;
 	}
@@ -390,17 +406,17 @@ async function downloadGameFiles(
 async function fetchUpload(
 	client: ItchClient,
 	config: Config,
-	game: Game,
+	product: Product,
 	page: DownloadPage,
 	upload: UploadRef,
-	gameDir: string,
+	productDir: string,
 ): Promise<boolean> {
 	let url: string | null;
 	try {
-		url = await resolveUploadUrl(client, game, page, upload);
+		url = await resolveUploadUrl(client, product, page, upload);
 	} catch (err) {
 		if (isAbortError(err)) throw err;
-		log.warn(`Skipped a file: ${game.dlurl}`);
+		log.warn(`Skipped a file: ${product.dlurl}`);
 		log.error("", err);
 		return false;
 	}
@@ -410,7 +426,7 @@ async function fetchUpload(
 		case "cloudflare":
 			// Signed, short-lived URLs without Last-Modified: keep the server's file name.
 			return downloadFile(client, url, {
-				dest: { dir: gameDir },
+				dest: { dir: productDir },
 				showProgress: config.log_download_progress,
 			});
 
@@ -435,9 +451,9 @@ async function fetchUpload(
 			const stamped = ext
 				? `${safeName.slice(0, -ext.length)}_${dateStamp(remoteDate)}${ext}`
 				: `${safeName}_${dateStamp(remoteDate)}`;
-			const undatedPath = join(gameDir, safeName);
-			const finalPath = join(gameDir, stamped);
-			await mkdir(gameDir, { recursive: true });
+			const undatedPath = join(productDir, safeName);
+			const finalPath = join(productDir, stamped);
+			await mkdir(productDir, { recursive: true });
 
 			// Files saved by older versions without a date stamp are renamed in place.
 			if (

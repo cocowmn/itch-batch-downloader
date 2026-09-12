@@ -6,24 +6,27 @@
 
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { Game } from "../../models/game.ts";
 import type { ItemMarker } from "../../models/marker.ts";
+import type { Product } from "../../models/product.ts";
 
 export const MARKER_FILE = ".itchio";
 
-export function buildMarker(game: Game, downloadName: string): ItemMarker {
+export function buildMarker(
+	product: Product,
+	downloadName: string,
+): ItemMarker {
 	return {
 		markerVersion: 1,
-		title: game.title,
-		slug: game.itchSlug,
+		title: product.title,
+		slug: product.itchSlug,
 		author: {
-			slug: game.author,
-			name: game.authorName || game.author,
-			url: game.author
-				? `https://${game.author}.itch.io`
-				: new URL(game.gameUrl).origin,
+			slug: product.author,
+			name: product.authorName || product.author,
+			url: product.author
+				? `https://${product.author}.itch.io`
+				: new URL(product.productUrl).origin,
 		},
-		url: game.gameUrl,
+		url: product.productUrl,
 		downloadName,
 		updatedAt: new Date().toISOString(),
 	};
@@ -52,10 +55,10 @@ async function writeMarkerJson(dir: string, marker: object): Promise<void> {
 /** Write a fresh marker; a hidden flag an admin set earlier is kept. */
 export async function writeMarker(
 	dir: string,
-	game: Game,
+	product: Product,
 	downloadName: string,
 ): Promise<void> {
-	const marker = buildMarker(game, downloadName);
+	const marker = buildMarker(product, downloadName);
 	if ((await readMarkerJson(dir))?.hidden === true) marker.hidden = true;
 	await writeMarkerJson(dir, marker);
 }

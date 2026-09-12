@@ -1,11 +1,11 @@
 # itch batch downloader
 
-A command-line tool, written in TypeScript and run with [Bun](https://bun.com), that downloads the items bound to your itch.io account in batch — the whole library, or just the items from specific bundles or specific authors.
+A command-line tool, written in TypeScript and run with [Bun](https://bun.com), that downloads the items bound to your itch.io account in batch — the whole library, the items from specific bundles or specific authors, or a handful of individual products.
 
 ## The downloader
 
 - Retrieves items currently bound to your itch.io account/library.
-- Optionally limits the run to specific **bundles** and/or specific **authors**.
+- Optionally limits the run to specific **bundles**, specific **authors** and/or individual **products**.
 - Attempts to download all available files it can access automatically.
 - Optionally captures product pages as PNG and PDF.
 - Downloads embedded videos (via yt-dlp).
@@ -107,7 +107,7 @@ Run `bun start --help` for the full list of options.
 | `download` (default) | Process the selected items. |
 | `list-bundles` | List the bundles bound to your account, with their names and keys. |
 | `list-authors` | List the authors in the current selection with item counts. |
-| `list-games` | List the selected items with the numbers used by the resume file. |
+| `list-products` | List the selected items with the numbers used by the resume file. |
 | `download-browser` | Browse what has been downloaded in a local web UI (see [Browsing your downloads](#browsing-your-downloads)). Works best if you enable downloading cover art and manifests with your content. |
 
 Every command accepts the same options:
@@ -119,6 +119,8 @@ Every command accepts the same options:
   -b, --bundle <name|key|url>
                             Only items of this bundle (repeatable)
   -a, --author <slug>       Only items by this author (repeatable)
+  -p, --product <url|author/game|title>
+                            This specific item of your library (repeatable)
       --png / --no-png      Enable/disable PNG page captures
       --pdf / --no-pdf      Enable/disable PDF page captures
       --files / --no-files  Enable/disable downloading the items' files
@@ -147,7 +149,7 @@ Every command accepts the same options:
 
 Command-line options override the values in the config file.
 
-## Limiting the run to bundles or authors
+## Limiting the run to bundles, products or authors
 
 ### By bundle
 
@@ -181,15 +183,35 @@ authors = ["cool-dev", "another-author"]
 
 Matching is case-insensitive and also accepts the author's display name as shown on itch.io.
 
-Bundle and author filters combine: `--bundle X --author Y` downloads only Y's items from bundle X.
+### By product
 
-Use `list-games` (or `--dry-run`) to preview exactly what a selection contains before downloading.
+Individual products of your library can be named directly:
+
+```bash
+bun start list-products                                # what is in your library
+bun start --product https://cool-dev.itch.io/space-game            # the product's page URL
+bun start --product https://cool-dev.itch.io/space-game/download/KEY   # or its download page
+bun start --product cool-dev/space-game                # author/game, as in the URL
+bun start --product "Space Game"                       # or the title
+```
+
+```toml
+products = ["https://cool-dev.itch.io/space-game", "cool-dev/moon-pack", "Some Title"]
+```
+
+Titles are matched case-insensitively, ignoring punctuation. Every product has to be found in your [purchases list](https://itch.io/my-purchases): an unknown one stops the run before anything is downloaded, and so does a title that several authors use (name those as `author/game` or by URL). Items that are not bound to your account cannot be selected this way.
+
+### Combining them
+
+`bundles` and `products` both add items to the run: `--bundle X --product Y` downloads everything in bundle X plus product Y. The author filter is applied to the result, so `--bundle X --author Y` downloads only Y's items from bundle X.
+
+Use `list-products` (or `--dry-run`) to preview exactly what a selection contains before downloading.
 
 ## What happens when the tool runs
 
 1. Read the configuration file and command-line options.
 2. Load the cookies from `cookies.txt`.
-3. Retrieve your library — or the contents of the selected bundles — and apply the author filter.
+3. Retrieve your library — or the contents of the selected bundles and the selected products — and apply the author filter.
 4. Iterate through each item:
    - work out its directory from `download_name` (see [Naming the item directories](#naming-the-item-directories)) and drop a small hidden `.itchio` marker file into it;
    - download all available files while attempting to avoid duplicates (`download_files`);
@@ -207,7 +229,7 @@ Progress and warnings are printed to the console. Files already present with the
 
 ```toml
 download_name = "{slug}"                               # default
-download_name = "{title}"                              # the full name of the project
+download_name = "{title}"                              # the full name of the product
 download_name = "{author}/{title}"                     # one directory per author
 download_name = "{yyyy}-{mm}-{dd}/{author}--{index}"   # dated run folders
 download_name = "{category}/{author}/{title}"          # Assets/… Game/… Tool/…
@@ -241,11 +263,11 @@ Every item directory receives a hidden `.itchio` file (JSON: title, slug, author
 
 ## Download progress tracking
 
-While running, a file named `itch-batch-downloader-track.txt` is kept in the download directory. It records the number of the item currently being processed (plus a fingerprint of the bundle/author selection), which lets the tool resume where it left off after an interruption.
+While running, a file named `itch-batch-downloader-track.txt` is kept in the download directory. It records the number of the item currently being processed (plus a fingerprint of the bundle/product/author selection), which lets the tool resume where it left off after an interruption.
 
 - **Restart from the beginning:** run with `--restart`, or delete the file.
-- **Resume from a specific item:** run with `--skip <n>` to skip the first *n* items — if a run of 35 items failed at item 31, `--skip 30` starts at item 31. `bun start list-games` shows the item numbers. (`--skip` overrides the resume file for that run.)
-- If the selection (bundles/authors) changes between runs the index is ignored automatically.
+- **Resume from a specific item:** run with `--skip <n>` to skip the first *n* items — if a run of 35 items failed at item 31, `--skip 30` starts at item 31. `bun start list-products` shows the item numbers. (`--skip` overrides the resume file for that run.)
+- If the selection (bundles/products/authors) changes between runs the index is ignored automatically.
 - A corrupted file is ignored.
 
 ## Stopping the tool
@@ -362,6 +384,7 @@ log_download_progress = true
 create_log = true
 bundles = []
 authors = []
+products = []
 # chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 # yt_dlp_path = "yt-dlp"
 admin_password = "generated-on-first-run"
@@ -384,6 +407,7 @@ admin_password = "generated-on-first-run"
 | `create_log` | `true` | Append all console output to `<download_directory>/downloads.log`. |
 | `bundles` | `[]` | Bundle names, keys or URLs to limit the run to. Empty = whole library. |
 | `authors` | `[]` | Author slugs (or display names) to limit the run to. Empty = everyone. |
+| `products` | `[]` | Individual products of your library to download: page URL, download page URL, `author/game` or title. Added to the items of `bundles`, if any. |
 | `chrome_path` | — | Explicit browser executable for page captures. |
 | `yt_dlp_path` | `"yt-dlp"` | yt-dlp executable. |
 | `admin_password` | random | Unlocks hiding, deleting and unzipping items in the download browser (click the library icon to sign in). A fresh random one is written when the file is created; remove the line to turn the admin features off. |

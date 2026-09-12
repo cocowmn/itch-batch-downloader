@@ -4,12 +4,12 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { load } from "cheerio";
-import type { Bundle, Game } from "../../models/game.ts";
 import type {
 	Manifest,
 	ManifestBundle,
 	ProductMetadata,
 } from "../../models/manifest.ts";
+import type { Bundle, Product } from "../../models/product.ts";
 import { findCoverImage } from "../artwork/artwork.ts";
 
 export const MANIFEST_SUFFIX = "_manifest.json";
@@ -97,32 +97,32 @@ export function redactManifest(manifest: Manifest): Manifest {
 }
 
 export function buildManifest(
-	game: Game,
+	product: Product,
 	metadata: ProductMetadata,
 	files: string[],
 	options: ManifestOptions = {},
 ): Manifest {
 	const includeKeys = options.includeKeys ?? true;
-	const authorUrl = game.author
-		? `https://${game.author}.itch.io`
-		: new URL(game.gameUrl).origin;
-	const bundles: ManifestBundle[] = (game.bundles ?? []).map((b: Bundle) =>
+	const authorUrl = product.author
+		? `https://${product.author}.itch.io`
+		: new URL(product.productUrl).origin;
+	const bundles: ManifestBundle[] = (product.bundles ?? []).map((b: Bundle) =>
 		includeKeys ? { name: b.name, key: b.key, url: b.url } : { name: b.name },
 	);
 	return {
 		manifestVersion: 1,
 		generatedAt: new Date().toISOString(),
-		title: game.title,
+		title: product.title,
 		author: {
-			slug: game.author,
-			name: game.authorName || metadata.info.Author || game.author,
+			slug: product.author,
+			name: product.authorName || metadata.info.Author || product.author,
 			url: authorUrl,
 		},
 		urls: includeKeys
-			? { page: game.gameUrl, downloadPage: game.dlurl }
-			: { page: game.gameUrl },
-		...(includeKeys ? { downloadKey: game.key } : {}),
-		directory: options.directory ?? game.itchSlug,
+			? { page: product.productUrl, downloadPage: product.dlurl }
+			: { page: product.productUrl },
+		...(includeKeys ? { downloadKey: product.key } : {}),
+		directory: options.directory ?? product.itchSlug,
 		bundles,
 		...metadata,
 		files,
@@ -131,14 +131,14 @@ export function buildManifest(
 
 /** Write `<dir>/<prefix>_manifest.json`; returns the path written. */
 export async function writeManifest(
-	game: Game,
+	product: Product,
 	html: string,
 	dir: string,
 	options: ManifestOptions = {},
 ): Promise<string> {
 	const path = join(
 		dir,
-		`${options.prefix ?? game.itchSlug}${MANIFEST_SUFFIX}`,
+		`${options.prefix ?? product.itchSlug}${MANIFEST_SUFFIX}`,
 	);
 	const entries = await readdir(dir).catch(() => [] as string[]);
 	const files = entries
@@ -150,7 +150,7 @@ export async function writeManifest(
 		)
 		.sort();
 	const manifest = buildManifest(
-		game,
+		product,
 		parseProductMetadata(html),
 		files,
 		options,

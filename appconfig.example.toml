@@ -63,6 +63,12 @@ bundles = []
 # Use `list-authors` to see the authors in your library. Empty = everyone.
 authors = []
 
+# Download specific items (products) of your library. Entries can be the
+# item's page URL (https://author.itch.io/game), its download page URL,
+# "author/game" or the item's title. Use `list-products` to see what you own.
+# Combined with `bundles` the run covers the bundles' items plus these.
+products = []
+
 # Optional explicit browser executable for page captures.
 # chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 

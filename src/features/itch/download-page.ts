@@ -1,5 +1,5 @@
 import { type CheerioAPI, load } from "cheerio";
-import type { Game } from "../../models/game.ts";
+import type { Product } from "../../models/product.ts";
 import { log } from "../../utils/log.ts";
 import type { ItchClient } from "./client.ts";
 import { absoluteUrl } from "./urls.ts";
@@ -62,28 +62,30 @@ function findDownloadHref(
  */
 export async function resolveUploadUrl(
 	client: ItchClient,
-	game: Game,
+	product: Product,
 	page: DownloadPage,
 	upload: UploadRef,
 ): Promise<string | null> {
 	const params = new URLSearchParams({
 		source: "game_download",
-		key: game.key,
+		key: product.key,
 	});
 	let res: Response;
 	if (upload.uploadId) {
-		// Legacy flow: POST {gameUrl}/file/{upload_id}?source=game_download&key=KEY
-		const url = `${game.gameUrl}/file/${upload.uploadId}?${params}`;
+		// Legacy flow: POST {productUrl}/file/{upload_id}?source=game_download&key=KEY
+		const url = `${product.productUrl}/file/${upload.uploadId}?${params}`;
 		res = await client.post(
 			url,
 			new URLSearchParams({ csrf_token: page.csrfToken }),
 		);
 	} else if (upload.directUrl) {
-		const base = absoluteUrl(upload.directUrl, game.gameUrl);
+		const base = absoluteUrl(upload.directUrl, product.productUrl);
 		const url = base.includes("?") ? `${base}&${params}` : `${base}?${params}`;
 		res = await client.get(url);
 	} else {
-		log.warn(`Skipped a file (no download button found): ${game.gameUrl}`);
+		log.warn(
+			`Skipped a file (no download button found): ${product.productUrl}`,
+		);
 		return null;
 	}
 	if (!res.ok) {

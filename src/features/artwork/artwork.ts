@@ -43,13 +43,13 @@ function extensionOf(url: string): string {
 }
 
 /**
- * Download the cover artwork of `gameUrl` into `dir` unless a cover file is
+ * Download the cover artwork of `productUrl` into `dir` unless a cover file is
  * already there. Returns true when a file was written.
  */
 export async function downloadCoverArtwork(
 	client: ItchClient,
 	html: string,
-	gameUrl: string,
+	productUrl: string,
 	dir: string,
 	prefix: string,
 	showProgress: boolean,
@@ -62,7 +62,7 @@ export async function downloadCoverArtwork(
 	}
 	const url = findCoverImage(html);
 	if (!url) {
-		log.warn(`No cover artwork found on ${gameUrl}`);
+		log.warn(`No cover artwork found on ${productUrl}`);
 		return false;
 	}
 	log.debug(`Cover artwork URL: ${url}`);

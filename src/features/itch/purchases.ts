@@ -1,5 +1,5 @@
 import { load } from "cheerio";
-import type { Game } from "../../models/game.ts";
+import type { Product } from "../../models/product.ts";
 import { log } from "../../utils/log.ts";
 import { slugify } from "../../utils/slugify.ts";
 import type { ItchClient } from "./client.ts";
@@ -7,12 +7,12 @@ import { absoluteUrl, authorFromUrl, ITCH_BASE } from "./urls.ts";
 
 export const MY_PURCHASES_URL = `${ITCH_BASE}/my-purchases`;
 
-/** Build a Game from its download page URL plus what the listing knew about it. */
-export function gameFromDownloadUrl(
+/** Build a Product from its download page URL plus what the listing knew about it. */
+export function productFromDownloadUrl(
 	title: string,
 	dlurl: string,
-	extra: { authorName?: string; gameUrl?: string } = {},
-): Game | null {
+	extra: { authorName?: string; productUrl?: string } = {},
+): Product | null {
 	let u: URL;
 	try {
 		u = new URL(dlurl);
@@ -24,13 +24,13 @@ export function gameFromDownloadUrl(
 	const itchSlug = segments[1] ?? "";
 	const key = segments[3] ?? "";
 	if (!itchSlug) return null;
-	const gameUrl = extra.gameUrl ?? `${u.origin}/${itchSlug}`;
+	const productUrl = extra.productUrl ?? `${u.origin}/${itchSlug}`;
 	return {
 		title: title.trim(),
 		slug: slugify(title),
 		dlurl,
-		gameUrl,
-		author: authorFromUrl(gameUrl) || authorFromUrl(dlurl),
+		productUrl,
+		author: authorFromUrl(productUrl) || authorFromUrl(dlurl),
 		authorName: extra.authorName?.trim() ?? "",
 		key,
 		itchSlug,
@@ -39,33 +39,33 @@ export function gameFromDownloadUrl(
 
 /** Parse one page of https://itch.io/my-purchases. */
 export function parsePurchasesPage(html: string): {
-	games: Game[];
+	products: Product[];
 	hasNext: boolean;
 } {
 	const $ = load(html);
-	const games: Game[] = [];
+	const products: Product[] = [];
 	$("div.game_cell_data").each((_, el) => {
 		const cell = $(el);
 		const title = cell.find("a.title.game_link").first().text();
 		const dlurl = cell.find("a.button").first().attr("href");
 		if (!title || !dlurl) return;
 		const authorLink = cell.find("div.game_author a").first();
-		const game = gameFromDownloadUrl(title, absoluteUrl(dlurl), {
+		const product = productFromDownloadUrl(title, absoluteUrl(dlurl), {
 			authorName: authorLink.text(),
 		});
-		if (!game) return;
+		if (!product) return;
 		const authorHref = authorLink.attr("href");
-		if (!game.author && authorHref)
-			game.author = authorFromUrl(absoluteUrl(authorHref));
-		games.push(game);
+		if (!product.author && authorHref)
+			product.author = authorFromUrl(absoluteUrl(authorHref));
+		products.push(product);
 	});
 	const hasNext = $("div.next_page.forward_link, a.next_page").length > 0;
-	return { games, hasNext };
+	return { products, hasNext };
 }
 
 /** Fetch every item in the account library. */
-export async function fetchPurchases(client: ItchClient): Promise<Game[]> {
-	const games: Game[] = [];
+export async function fetchPurchases(client: ItchClient): Promise<Product[]> {
+	const products: Product[] = [];
 	let page = 1;
 	for (;;) {
 		const url =
@@ -77,13 +77,15 @@ export async function fetchPurchases(client: ItchClient): Promise<Game[]> {
 			log.warn(`Stopping at page ${page}: HTTP ${res.status}`);
 			break;
 		}
-		const { games: pageGames, hasNext } = parsePurchasesPage(await res.text());
-		for (const g of pageGames)
+		const { products: pageProducts, hasNext } = parsePurchasesPage(
+			await res.text(),
+		);
+		for (const g of pageProducts)
 			log.debug(`Item found - Title: ${g.slug}. url: ${g.dlurl}`);
-		games.push(...pageGames);
-		if (!hasNext || pageGames.length === 0) break;
+		products.push(...pageProducts);
+		if (!hasNext || pageProducts.length === 0) break;
 		page++;
 		log.dot();
 	}
-	return games;
+	return products;
 }

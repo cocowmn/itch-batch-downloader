@@ -20,6 +20,7 @@ export const DEFAULTS: Config = {
 	log_download_progress: true,
 	bundles: [],
 	authors: [],
+	products: [],
 	yt_dlp_path: "yt-dlp",
 };
 
@@ -100,6 +101,12 @@ bundles = []
 # Use \`list-authors\` to see the authors in your library. Empty = everyone.
 authors = []
 
+# Download specific items (products) of your library. Entries can be the
+# item's page URL (https://author.itch.io/game), its download page URL,
+# "author/game" or the item's title. Use \`list-products\` to see what you own.
+# Combined with \`bundles\` the run covers the bundles' items plus these.
+products = []
+
 # Optional explicit browser executable for page captures.
 # chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
@@ -138,6 +145,7 @@ export interface ConfigOverrides {
 	create_log?: boolean;
 	bundles?: string[];
 	authors?: string[];
+	products?: string[];
 	chrome_path?: string;
 	yt_dlp_path?: string;
 	admin_password?: string;
@@ -187,6 +195,7 @@ export async function loadConfig(
 	config.authors = config.authors
 		.map((s) => s.trim().toLowerCase())
 		.filter(Boolean);
+	config.products = config.products.map((s) => s.trim()).filter(Boolean);
 	if (!config.admin_password?.trim()) delete config.admin_password;
 	return config;
 }
@@ -252,5 +261,6 @@ function validate(raw: unknown, path: string): Partial<Config> {
 	bool("create_log");
 	list("bundles");
 	list("authors");
+	list("products");
 	return out;
 }

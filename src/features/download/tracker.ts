@@ -1,7 +1,7 @@
 // Resume support: a small JSON file in the download directory remembering the
 // 1-based index of the item being processed. When the selection (bundle /
-// author filters) changes between runs the index is meaningless, so a
-// fingerprint of the selection is stored next to it.
+// product / author filters) changes between runs the index is meaningless, so
+// a fingerprint of the selection is stored next to it.
 
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,13 +17,19 @@ export interface TrackState {
 export function selectionFingerprint(
 	bundles: string[],
 	authors: string[],
+	products: string[] = [],
 ): string {
 	const norm = (xs: string[]) =>
 		[...xs]
 			.map((s) => s.trim().toLowerCase())
 			.sort()
 			.join(",");
-	return `bundles=${norm(bundles)}|authors=${norm(authors)}`;
+	// The products part is only added when used, so resume files written
+	// before it existed stay valid.
+	return (
+		`bundles=${norm(bundles)}|authors=${norm(authors)}` +
+		(products.length ? `|products=${norm(products)}` : "")
+	);
 }
 
 export class Tracker {
@@ -57,7 +63,7 @@ export class Tracker {
 			if (typeof state.index !== "number") return 0;
 			if (state.selection !== undefined && state.selection !== this.selection) {
 				log.info(
-					"Bundle/author selection changed since the last run; starting from the beginning.",
+					"Bundle/product/author selection changed since the last run; starting from the beginning.",
 				);
 				return 0;
 			}

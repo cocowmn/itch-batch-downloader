@@ -17,6 +17,9 @@ export interface Config {
 	create_log: boolean;
 	bundles: string[];
 	authors: string[];
+
+	/** Individual items to download: page URL, download URL, "author/slug" or title. */
+	products: string[];
 	chrome_path?: string;
 	yt_dlp_path: string;
 

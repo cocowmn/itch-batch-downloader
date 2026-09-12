@@ -1,8 +1,8 @@
 // The download_name template: where an item's directory goes inside the
 // download directory. Parsed and validated once at start-up, resolved per item.
 
-import type { Game } from "../../models/game.ts";
 import type { ProductMetadata } from "../../models/manifest.ts";
+import type { Product } from "../../models/product.ts";
 
 export class DownloadNameError extends Error {}
 
@@ -227,7 +227,7 @@ export function downloadNameWarnings(name: DownloadName): string[] {
 }
 
 export interface NameContext {
-	game: Game;
+	product: Product;
 	/** 1-based position in the run. */
 	index: number;
 	total: number;
@@ -286,7 +286,7 @@ function tokenValue(
 	separator: string,
 	ctx: NameContext,
 ): string {
-	const { game, runStarted: d } = ctx;
+	const { product, runStarted: d } = ctx;
 	const page = ctx.page ?? null;
 	const list = (items: string[], fallback: string) =>
 		items.length
@@ -297,15 +297,15 @@ function tokenValue(
 			: fallback;
 	switch (spec.name) {
 		case "title":
-			return game.title || game.itchSlug;
+			return product.title || product.itchSlug;
 		case "slug":
-			return game.itchSlug;
+			return product.itchSlug;
 		case "author":
-			return game.author || "unknown-author";
+			return product.author || "unknown-author";
 		case "author_name":
-			return game.authorName || game.author || "unknown-author";
+			return product.authorName || product.author || "unknown-author";
 		case "bundle":
-			return game.bundles?.[0]?.name || "library";
+			return product.bundles?.[0]?.name || "library";
 		case "id":
 			return page?.itchId !== null && page?.itchId !== undefined
 				? String(page.itchId)
@@ -367,7 +367,7 @@ export function resolveDownloadName(
 ): string {
 	if (name.needsPage && !ctx.page) {
 		throw new DownloadNameError(
-			`download_name = "${name.source}" needs the product page of "${ctx.game.title}", which could not be loaded`,
+			`download_name = "${name.source}" needs the product page of "${ctx.product.title}", which could not be loaded`,
 		);
 	}
 	const segments = name.segments.map((parts) => {
@@ -383,7 +383,7 @@ export function resolveDownloadName(
 	for (const seg of segments) {
 		if (!seg || seg === "." || seg === "..") {
 			throw new DownloadNameError(
-				`download_name = "${name.source}" produced an unusable directory name for "${ctx.game.title}" (${segments.map((s) => JSON.stringify(s)).join("/")})`,
+				`download_name = "${name.source}" produced an unusable directory name for "${ctx.product.title}" (${segments.map((s) => JSON.stringify(s)).join("/")})`,
 			);
 		}
 	}

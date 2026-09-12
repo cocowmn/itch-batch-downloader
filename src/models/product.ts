@@ -1,5 +1,5 @@
 /** An item bound to the account that can be downloaded. */
-export interface Game {
+export interface Product {
 	/** Human readable title as shown on itch.io. */
 	title: string;
 
@@ -10,7 +10,7 @@ export interface Game {
 	dlurl: string;
 
 	/** Public product page, e.g. https://author.itch.io/game */
-	gameUrl: string;
+	productUrl: string;
 
 	/** Author slug, the `author` part of author.itch.io. Empty when unknown. */
 	author: string;
@@ -37,9 +37,9 @@ export interface Bundle {
 }
 
 /** A row of a bundle download page. Only claimed rows carry a download page. */
-export interface BundleGame {
+export interface BundleProduct {
 	title: string;
-	gameUrl: string;
+	productUrl: string;
 	author: string;
 	authorName: string;
 	claimed: boolean;

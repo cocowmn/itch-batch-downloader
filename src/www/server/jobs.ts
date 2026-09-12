@@ -9,13 +9,13 @@ import { basename, join } from "node:path";
 import { PageCapturer } from "../../features/capture/capture.ts";
 import { processItem } from "../../features/download/pipeline.ts";
 import { createClient } from "../../features/itch/client.ts";
-import { gameFromDownloadUrl } from "../../features/itch/purchases.ts";
+import { productFromDownloadUrl } from "../../features/itch/purchases.ts";
 import { MANIFEST_SUFFIX } from "../../features/manifest/manifest.ts";
 import { parseDownloadName } from "../../features/naming/naming.ts";
 import { VideoDownloader } from "../../features/videos/videos.ts";
 import type { Config } from "../../models/config.ts";
-import type { Bundle, Game } from "../../models/game.ts";
 import type { JobStatus } from "../../models/jobs.ts";
+import type { Bundle, Product } from "../../models/product.ts";
 import { isAbortError } from "../../utils/abort.ts";
 import { log } from "../../utils/log.ts";
 import { readManifest } from "./library.ts";
@@ -83,13 +83,13 @@ export class FetchJobs {
 				"The manifest has no download page: run the downloader with manifest_include_keys = true.",
 				400,
 			);
-		const game = gameFromDownloadUrl(manifest.title, dlurl, {
-			gameUrl: manifest.urls.page,
+		const product = productFromDownloadUrl(manifest.title, dlurl, {
+			productUrl: manifest.urls.page,
 			authorName: manifest.author?.name,
 		});
-		if (!game)
+		if (!product)
 			throw new JobError("The manifest's download page URL is unusable.", 400);
-		game.bundles = manifest.bundles
+		product.bundles = manifest.bundles
 			.filter((b): b is Bundle => Boolean(b.key && b.url))
 			.map((b) => ({ name: b.name, key: b.key, url: b.url }));
 		if (!(await Bun.file(this.config.cookie_file).exists()))
@@ -123,13 +123,13 @@ export class FetchJobs {
 			expiry: null,
 		};
 		this.current = job;
-		job.finished = this.runJob(job, game).catch((err) => {
+		job.finished = this.runJob(job, product).catch((err) => {
 			log.error("Download job crashed", err);
 		});
 		return status;
 	}
 
-	private async runJob(job: Job, game: Game): Promise<void> {
+	private async runJob(job: Job, product: Product): Promise<void> {
 		const { status, controller } = job;
 		const untap = log.tap((line) => {
 			status.log.push(line);
@@ -146,7 +146,7 @@ export class FetchJobs {
 		try {
 			log.raw();
 			log.info(
-				`Download job for '${game.slug}' started by the download browser`,
+				`Download job for '${product.slug}' started by the download browser`,
 			);
 			const client = await createClient(config, controller.signal);
 			capturer = new PageCapturer(client.jar, {
@@ -160,7 +160,7 @@ export class FetchJobs {
 			const relative = await processItem({
 				client,
 				config,
-				game,
+				product,
 				index: 1,
 				total: 1,
 				runStarted: new Date(),
@@ -175,7 +175,7 @@ export class FetchJobs {
 			status.size = await zipSize(job.itemDir);
 			status.state = "done";
 			status.message = "Ready to download.";
-			log.info(`Download job for '${game.slug}' finished`);
+			log.info(`Download job for '${product.slug}' finished`);
 			job.expiry = setTimeout(() => {
 				this.cleanup(job).catch(() => {});
 			}, EXPIRY_MS);
@@ -183,11 +183,11 @@ export class FetchJobs {
 			if (isAbortError(err) || controller.signal.aborted) {
 				status.state = "cancelled";
 				status.message = "Cancelled.";
-				log.info(`Download job for '${game.slug}' cancelled`);
+				log.info(`Download job for '${product.slug}' cancelled`);
 			} else {
 				status.state = "failed";
 				status.message = err instanceof Error ? err.message : String(err);
-				log.error(`Download job for '${game.slug}' failed`, err);
+				log.error(`Download job for '${product.slug}' failed`, err);
 			}
 			await rm(job.tmp, { recursive: true, force: true }).catch(() => {});
 		} finally {

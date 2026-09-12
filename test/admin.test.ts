@@ -12,8 +12,8 @@ import {
 	readMarker,
 	writeMarker,
 } from "../src/features/manifest/marker.ts";
-import type { Game } from "../src/models/game.ts";
 import type { LibraryItem, LibraryResponse } from "../src/models/library.ts";
+import type { Product } from "../src/models/product.ts";
 import {
 	ADMIN_COOKIE,
 	AdminSessions,
@@ -172,25 +172,25 @@ describe("HiddenItems", () => {
 	test("a re-download keeps the hidden flag", async () => {
 		const root = await mkdtemp(join(tmpdir(), "ibd-hidden-"));
 		try {
-			const game = {
+			const product = {
 				title: "Thing",
 				itchSlug: "thing",
 				author: "maker",
 				authorName: "Maker",
-				gameUrl: "https://maker.itch.io/thing",
-			} as Game;
+				productUrl: "https://maker.itch.io/thing",
+			} as Product;
 			await mkdir(join(root, "thing"));
-			await writeMarker(join(root, "thing"), game, "{title}");
+			await writeMarker(join(root, "thing"), product, "{title}");
 			const hidden = new HiddenItems(root);
 			await hidden.mark("thing", true);
-			await writeMarker(join(root, "thing"), game, "{title}");
+			await writeMarker(join(root, "thing"), product, "{title}");
 			expect(await hidden.has("thing")).toBe(true);
 			expect(await readMarker(join(root, "thing"))).toMatchObject({
 				title: "Thing",
 				hidden: true,
 			});
 			await hidden.mark("thing", false);
-			await writeMarker(join(root, "thing"), game, "{title}");
+			await writeMarker(join(root, "thing"), product, "{title}");
 			expect(await readMarker(join(root, "thing"))).not.toHaveProperty(
 				"hidden",
 			);

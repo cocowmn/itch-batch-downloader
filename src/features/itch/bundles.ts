@@ -1,5 +1,5 @@
 import { load } from "cheerio";
-import type { Bundle, BundleGame } from "../../models/game.ts";
+import type { Bundle, BundleProduct } from "../../models/product.ts";
 import { log } from "../../utils/log.ts";
 import { comparable } from "../../utils/slugify.ts";
 import type { ItchClient } from "./client.ts";
@@ -52,28 +52,28 @@ export async function fetchOwnedBundles(client: ItchClient): Promise<Bundle[]> {
  * download button; unclaimed rows carry a claim form instead.
  */
 export function parseBundlePage(html: string): {
-	games: BundleGame[];
+	products: BundleProduct[];
 	hasNext: boolean;
 } {
 	const $ = load(html);
-	const games: BundleGame[] = [];
+	const products: BundleProduct[] = [];
 	$("div.game_row").each((_, el) => {
 		const row = $(el);
 		const titleLink = row.find(".game_title a").first();
 		const title = titleLink.text().trim();
 		const titleHref = titleLink.attr("href");
 		if (!title || !titleHref) return;
-		const gameUrl = absoluteUrl(titleHref).replace(
+		const productUrl = absoluteUrl(titleHref).replace(
 			/\/download\/[^/?#]+.*$/,
 			"",
 		);
 		const dlHref = row.find("a.game_download_btn").first().attr("href");
 		const authorLink = row.find(".game_author a").first();
-		games.push({
+		products.push({
 			title,
-			gameUrl,
+			productUrl,
 			author:
-				authorFromUrl(gameUrl) ||
+				authorFromUrl(productUrl) ||
 				authorFromUrl(absoluteUrl(authorLink.attr("href") ?? "")),
 			authorName: authorLink.text().trim(),
 			claimed: !!dlHref,
@@ -81,14 +81,14 @@ export function parseBundlePage(html: string): {
 		});
 	});
 	const hasNext = $("a.next_page, div.next_page").length > 0;
-	return { games, hasNext };
+	return { products, hasNext };
 }
 
-export async function fetchBundleGames(
+export async function fetchBundleProducts(
 	client: ItchClient,
 	bundle: Bundle,
-): Promise<BundleGame[]> {
-	const games: BundleGame[] = [];
+): Promise<BundleProduct[]> {
+	const products: BundleProduct[] = [];
 	let page = 1;
 	for (;;) {
 		const url = page === 1 ? bundle.url : `${bundle.url}?page=${page}`;
@@ -103,13 +103,15 @@ export async function fetchBundleGames(
 			);
 			break;
 		}
-		const { games: pageGames, hasNext } = parseBundlePage(await res.text());
-		games.push(...pageGames);
-		if (!hasNext || pageGames.length === 0) break;
+		const { products: pageProducts, hasNext } = parseBundlePage(
+			await res.text(),
+		);
+		products.push(...pageProducts);
+		if (!hasNext || pageProducts.length === 0) break;
 		page++;
 		log.dot();
 	}
-	return games;
+	return products;
 }
 
 /**

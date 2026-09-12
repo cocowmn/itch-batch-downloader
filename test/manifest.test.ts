@@ -7,7 +7,7 @@ import {
 	parseProductMetadata,
 	writeManifest,
 } from "../src/features/manifest/manifest.ts";
-import type { Game } from "../src/models/game.ts";
+import type { Product } from "../src/models/product.ts";
 
 const html = `<html><head>
 <meta property="og:image" content="https://img.itch.zone/abc/original/cover.png"/>
@@ -24,11 +24,11 @@ const html = `<html><head>
 <iframe src="//www.youtube.com/embed/xyz"></iframe>
 </body></html>`;
 
-const game: Game = {
+const product: Product = {
 	title: "Sci-fi Character Pack 1",
 	slug: "Sci-fi Character Pack 1",
 	dlurl: "https://penusbmic.itch.io/characterpack1/download/KEY",
-	gameUrl: "https://penusbmic.itch.io/characterpack1",
+	productUrl: "https://penusbmic.itch.io/characterpack1",
 	author: "penusbmic",
 	authorName: "",
 	key: "KEY",
@@ -58,13 +58,13 @@ describe("manifest", () => {
 	});
 
 	test("buildManifest fills the author name from the info panel", () => {
-		const m = buildManifest(game, parseProductMetadata(html), ["a.zip"]);
+		const m = buildManifest(product, parseProductMetadata(html), ["a.zip"]);
 		expect(m.author).toEqual({
 			slug: "penusbmic",
 			name: "Penusbmic",
 			url: "https://penusbmic.itch.io",
 		});
-		expect(m.urls.downloadPage).toBe(game.dlurl);
+		expect(m.urls.downloadPage).toBe(product.dlurl);
 		expect(m.downloadKey).toBe("KEY");
 		expect(m.bundles[0]).toEqual({
 			name: "Big Bundle",
@@ -75,11 +75,11 @@ describe("manifest", () => {
 	});
 
 	test("includeKeys: false leaves no download keys anywhere", () => {
-		const m = buildManifest(game, parseProductMetadata(html), [], {
+		const m = buildManifest(product, parseProductMetadata(html), [], {
 			includeKeys: false,
 		});
 		expect(m.downloadKey).toBeUndefined();
-		expect(m.urls).toEqual({ page: game.gameUrl });
+		expect(m.urls).toEqual({ page: product.productUrl });
 		expect(m.bundles).toEqual([{ name: "Big Bundle" }]);
 		expect(JSON.stringify(m)).not.toContain("KEY");
 		expect(JSON.stringify(m)).not.toContain("B1");
@@ -91,14 +91,14 @@ describe("manifest", () => {
 			await Bun.write(join(dir, "b.zip"), "x");
 			await Bun.write(join(dir, "a.png"), "x");
 			await Bun.write(join(dir, "c.zip.incomplete"), "x");
-			const path = await writeManifest(game, html, dir);
+			const path = await writeManifest(product, html, dir);
 			expect(path).toBe(join(dir, "characterpack1_manifest.json"));
 			const written = await Bun.file(path).json();
 			expect(written.manifestVersion).toBe(1);
 			expect(written.title).toBe("Sci-fi Character Pack 1");
 			expect(written.files).toEqual(["a.png", "b.zip"]);
 			// A second write refreshes the file and still excludes the manifest itself.
-			await writeManifest(game, html, dir);
+			await writeManifest(product, html, dir);
 			expect((await Bun.file(path).json()).files).toEqual(["a.png", "b.zip"]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });

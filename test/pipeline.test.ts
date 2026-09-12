@@ -8,18 +8,18 @@ import { ItchClient } from "../src/features/itch/client.ts";
 import { CookieJar } from "../src/features/itch/cookie-jar.ts";
 import { parseDownloadName } from "../src/features/naming/naming.ts";
 import type { Config } from "../src/models/config.ts";
-import type { Game } from "../src/models/game.ts";
+import type { Product } from "../src/models/product.ts";
 import { isAbortError } from "../src/utils/abort.ts";
 
 const downloadPage = await Bun.file(
 	join(import.meta.dir, "fixtures", "download-page-new.html"),
 ).text();
 
-const game: Game = {
+const product: Product = {
 	title: "Space Game",
 	slug: "space-game",
 	dlurl: "https://cool-dev.itch.io/space-game/download/AbC123",
-	gameUrl: "https://cool-dev.itch.io/space-game",
+	productUrl: "https://cool-dev.itch.io/space-game",
 	author: "cool-dev",
 	authorName: "Cool Dev",
 	key: "AbC123",
@@ -42,7 +42,7 @@ class StubClient extends ItchClient {
 
 	override async fetch(url: string, init: RequestInit = {}): Promise<Response> {
 		const signal = init.signal ?? this.signal;
-		if (url === game.dlurl) return new Response(downloadPage);
+		if (url === product.dlurl) return new Response(downloadPage);
 		if (url.includes("/download/AbC123/5001"))
 			return Response.json({ url: CDN });
 		if (url === CDN) {
@@ -84,6 +84,7 @@ const config: Config = {
 	create_log: false,
 	bundles: [],
 	authors: [],
+	products: [],
 	yt_dlp_path: "yt-dlp",
 };
 
@@ -96,7 +97,7 @@ describe("processItem", () => {
 			const run = processItem({
 				client,
 				config,
-				game,
+				product,
 				index: 1,
 				total: 1,
 				runStarted: new Date(),

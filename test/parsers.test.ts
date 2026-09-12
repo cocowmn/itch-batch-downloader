@@ -9,8 +9,8 @@ import {
 	parseDownloadPage,
 } from "../src/features/itch/download-page.ts";
 import {
-	gameFromDownloadUrl,
 	parsePurchasesPage,
+	productFromDownloadUrl,
 } from "../src/features/itch/purchases.ts";
 import {
 	findEmbeddedVideos,
@@ -21,37 +21,37 @@ const fixture = (name: string) =>
 	Bun.file(new URL(`./fixtures/${name}`, import.meta.url)).text();
 
 describe("parsePurchasesPage", () => {
-	test("extracts games, authors and pagination", async () => {
-		const { games, hasNext } = parsePurchasesPage(
+	test("extracts products, authors and pagination", async () => {
+		const { products, hasNext } = parsePurchasesPage(
 			await fixture("purchases.html"),
 		);
 		expect(hasNext).toBe(true);
-		expect(games).toHaveLength(2);
-		expect(games[0]).toMatchObject({
+		expect(products).toHaveLength(2);
+		expect(products[0]).toMatchObject({
 			title: "Space Game: Ünïcode Edition",
 			slug: "Space Game: Unicode Edition",
 			dlurl: "https://cool-dev.itch.io/space-game/download/AbC123",
-			gameUrl: "https://cool-dev.itch.io/space-game",
+			productUrl: "https://cool-dev.itch.io/space-game",
 			author: "cool-dev",
 			authorName: "Cool Dev",
 			key: "AbC123",
 			itchSlug: "space-game",
 		});
-		expect(games[1]!.author).toBe("other");
+		expect(products[1]!.author).toBe("other");
 	});
 
 	test("last page has no next link", async () => {
-		const { games, hasNext } = parsePurchasesPage(
+		const { products, hasNext } = parsePurchasesPage(
 			await fixture("purchases-last.html"),
 		);
 		expect(hasNext).toBe(false);
-		expect(games).toHaveLength(1);
+		expect(products).toHaveLength(1);
 	});
 });
 
-describe("gameFromDownloadUrl", () => {
+describe("productFromDownloadUrl", () => {
 	test("rejects garbage", () => {
-		expect(gameFromDownloadUrl("x", "not a url")).toBeNull();
+		expect(productFromDownloadUrl("x", "not a url")).toBeNull();
 	});
 });
 
@@ -73,14 +73,14 @@ describe("bundles", () => {
 	});
 
 	test("parseBundlePage distinguishes claimed and unclaimed rows", async () => {
-		const { games, hasNext } = parseBundlePage(
+		const { products, hasNext } = parseBundlePage(
 			await fixture("bundle-page.html"),
 		);
 		expect(hasNext).toBe(true);
-		expect(games).toEqual([
+		expect(products).toEqual([
 			{
 				title: "Space Game",
-				gameUrl: "https://cool-dev.itch.io/space-game",
+				productUrl: "https://cool-dev.itch.io/space-game",
 				author: "cool-dev",
 				authorName: "Cool Dev",
 				claimed: true,
@@ -88,7 +88,7 @@ describe("bundles", () => {
 			},
 			{
 				title: "Unclaimed Thing",
-				gameUrl: "https://someone.itch.io/unclaimed-thing",
+				productUrl: "https://someone.itch.io/unclaimed-thing",
 				author: "someone",
 				authorName: "Someone",
 				claimed: false,

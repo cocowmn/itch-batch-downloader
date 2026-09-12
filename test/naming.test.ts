@@ -16,14 +16,14 @@ import {
 	resolveDownloadName,
 	safeSegment,
 } from "../src/features/naming/naming.ts";
-import type { Game } from "../src/models/game.ts";
+import type { Product } from "../src/models/product.ts";
 import { scanLibrary } from "../src/www/server/library.ts";
 
-const game: Game = {
+const product: Product = {
 	title: "Sci-fi: Character Pack 1?",
 	slug: "Sci-fi Character Pack 1",
 	dlurl: "https://penusbmic.itch.io/characterpack1/download/KEY",
-	gameUrl: "https://penusbmic.itch.io/characterpack1",
+	productUrl: "https://penusbmic.itch.io/characterpack1",
 	author: "penusbmic",
 	authorName: "Penusbmic",
 	key: "KEY",
@@ -47,7 +47,7 @@ const page = {
 };
 
 const runStarted = new Date(2026, 8, 11, 7, 5, 9, 42);
-const ctx = { game, index: 7, total: 217, runStarted, page };
+const ctx = { product, index: 7, total: 217, runStarted, page };
 
 describe("download_name template", () => {
 	test("default and nested templates resolve to safe paths", () => {
@@ -116,11 +116,11 @@ describe("download_name template", () => {
 	});
 
 	test("missing values fall back instead of producing empty segments", () => {
-		const anonymous = { ...game, author: "", authorName: "", bundles: [] };
+		const anonymous = { ...product, author: "", authorName: "", bundles: [] };
 		expect(
 			resolveDownloadName(parseDownloadName("{author}/{bundle}/{slug}"), {
 				...ctx,
-				game: anonymous,
+				product: anonymous,
 			}),
 		).toBe("unknown-author/library/characterpack1");
 	});
@@ -212,10 +212,10 @@ describe("download_name template", () => {
 
 describe("item marker", () => {
 	test("contains public identity only", () => {
-		const marker = buildMarker(game, "{author}/{title}");
+		const marker = buildMarker(product, "{author}/{title}");
 		expect(JSON.stringify(marker)).not.toContain("KEY");
 		expect(marker.author.url).toBe("https://penusbmic.itch.io");
-		expect(marker.url).toBe(game.gameUrl);
+		expect(marker.url).toBe(product.productUrl);
 	});
 
 	test("nested item directories are found through their markers", async () => {
@@ -223,7 +223,7 @@ describe("item marker", () => {
 		try {
 			const nested = join(root, "penusbmic", "Sci-fi Pack");
 			await Bun.write(join(nested, "pack.zip"), "zip");
-			await writeMarker(nested, game, "{author}/{title}");
+			await writeMarker(nested, product, "{author}/{title}");
 			await Bun.write(join(nested, "Sci-fi Pack_cover-artwork.png"), "png");
 			// a legacy flat directory without marker next to it
 			await Bun.write(join(root, "oldie", "1_old_20240101.zip"), "zip");
@@ -239,9 +239,9 @@ describe("item marker", () => {
 				"penusbmic/Sci-fi Pack",
 			]);
 			const [oldie, item] = lib.items;
-			expect(item?.title).toBe(game.title);
+			expect(item?.title).toBe(product.title);
 			expect(item?.author?.name).toBe("Penusbmic");
-			expect(item?.urls).toEqual({ page: game.gameUrl });
+			expect(item?.urls).toEqual({ page: product.productUrl });
 			expect(item?.cover).toBe(
 				"/files/penusbmic/Sci-fi%20Pack/Sci-fi%20Pack_cover-artwork.png",
 			);

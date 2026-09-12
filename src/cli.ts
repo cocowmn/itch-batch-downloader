@@ -6,12 +6,12 @@ import {
 	DEFAULT_CONFIG_FILE,
 	loadConfig,
 } from "./features/config/config.ts";
-import { printGameList, run } from "./features/download/pipeline.ts";
+import { printProductList, run } from "./features/download/pipeline.ts";
 import { fetchOwnedBundles } from "./features/itch/bundles.ts";
 import { createClient, NotAuthenticatedError } from "./features/itch/client.ts";
 import {
 	reportUnclaimed,
-	selectGames,
+	selectProducts,
 } from "./features/selection/selection.ts";
 import type { Config } from "./models/config.ts";
 import { log } from "./utils/log.ts";
@@ -27,7 +27,7 @@ Commands:
   download        Download the selected items (default)
   list-bundles    List the bundles bound to this account
   list-authors    List the authors in the selection with item counts
-  list-games      List the selected items with their resume numbers
+  list-products   List the selected items with their resume numbers
   download-browser
                   Browse what has been downloaded in a local web UI
 
@@ -40,6 +40,8 @@ Options:
   -b, --bundle <name|key|url>
                             Only items of this bundle (repeatable)
   -a, --author <slug>       Only items by this author (repeatable)
+  -p, --product <url|author/game|title>
+                            This specific item of your library (repeatable)
       --png / --no-png      Enable/disable PNG page captures
       --pdf / --no-pdf      Enable/disable PDF page captures
       --files / --no-files  Enable/disable downloading the items' files
@@ -80,6 +82,7 @@ function parseCli(argv: string[]) {
 			"cookie-file": { type: "string" },
 			bundle: { type: "string", short: "b", multiple: true },
 			author: { type: "string", short: "a", multiple: true },
+			product: { type: "string", short: "p", multiple: true },
 			png: { type: "boolean" },
 			pdf: { type: "boolean" },
 			files: { type: "boolean" },
@@ -118,6 +121,7 @@ function parseCli(argv: string[]) {
 		create_log: values.log,
 		bundles: values.bundle,
 		authors: values.author,
+		products: values.product,
 		chrome_path: values["chrome-path"],
 		yt_dlp_path: values["yt-dlp-path"],
 	};
@@ -174,13 +178,14 @@ async function listBundles(config: Config): Promise<void> {
 
 async function listAuthors(config: Config): Promise<void> {
 	const client = await createClient(config);
-	const selection = await selectGames(client, {
+	const selection = await selectProducts(client, {
 		bundles: config.bundles,
+		products: config.products,
 		authors: [],
 	});
 	reportUnclaimed(selection.unclaimed);
 	const counts = new Map<string, { name: string; count: number }>();
-	for (const g of selection.games) {
+	for (const g of selection.products) {
 		const key = g.author || "?";
 		const entry = counts.get(key) ?? { name: g.authorName, count: 0 };
 		entry.count++;
@@ -190,7 +195,9 @@ async function listAuthors(config: Config): Promise<void> {
 	const rows = [...counts.entries()].sort(
 		(a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0]),
 	);
-	log.info(`${rows.length} author(s) across ${selection.games.length} items:`);
+	log.info(
+		`${rows.length} author(s) across ${selection.products.length} items:`,
+	);
 	const width = String(Math.max(...rows.map(([, v]) => v.count))).length;
 	for (const [slug, { name, count }] of rows) {
 		log.raw(
@@ -199,12 +206,12 @@ async function listAuthors(config: Config): Promise<void> {
 	}
 }
 
-async function listGames(config: Config): Promise<void> {
+async function listProducts(config: Config): Promise<void> {
 	const client = await createClient(config);
-	const selection = await selectGames(client, config);
+	const selection = await selectProducts(client, config);
 	reportUnclaimed(selection.unclaimed);
-	log.info(`${selection.games.length} item(s) selected:`);
-	printGameList(selection);
+	log.info(`${selection.products.length} item(s) selected:`);
+	printProductList(selection);
 }
 
 async function main(): Promise<number> {
@@ -248,8 +255,8 @@ async function main(): Promise<number> {
 		case "list-authors":
 			await listAuthors(config);
 			break;
-		case "list-games":
-			await listGames(config);
+		case "list-products":
+			await listProducts(config);
 			break;
 		case "download-browser":
 			await serveDownloadBrowser(config, {

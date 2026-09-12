@@ -10,10 +10,12 @@ import {
 import { filenameFromResponse } from "../src/features/download/transfer.ts";
 import { CookieJar } from "../src/features/itch/cookie-jar.ts";
 import {
-	bundleGamesToGames,
+	bundleProductsToProducts,
 	filterByAuthors,
+	parseProductSelector,
+	resolveProductSelectors,
 } from "../src/features/selection/selection.ts";
-import type { Game } from "../src/models/game.ts";
+import type { Product } from "../src/models/product.ts";
 import { comparable, slugify } from "../src/utils/slugify.ts";
 import { compactTimestamp } from "../src/utils/time.ts";
 
@@ -130,28 +132,95 @@ describe("filenameFromResponse", () => {
 });
 
 describe("filter", () => {
-	const game = (author: string, authorName = ""): Game => ({
+	const product = (author: string, authorName = ""): Product => ({
 		title: "t",
 		slug: "t",
 		dlurl: `https://${author}.itch.io/g/download/k`,
-		gameUrl: `https://${author}.itch.io/g`,
+		productUrl: `https://${author}.itch.io/g`,
 		author,
 		authorName,
 		key: "k",
 		itchSlug: "g",
 	});
 	test("filterByAuthors matches slug or display name, case-insensitively", () => {
-		const games = [game("cool-dev", "Cool Dev"), game("other", "Other Person")];
-		expect(filterByAuthors(games, [])).toHaveLength(2);
-		expect(filterByAuthors(games, ["COOL-DEV"])).toEqual([games[0]!]);
-		expect(filterByAuthors(games, ["other person"])).toEqual([games[1]!]);
-		expect(filterByAuthors(games, ["nobody"])).toEqual([]);
+		const products = [
+			product("cool-dev", "Cool Dev"),
+			product("other", "Other Person"),
+		];
+		expect(filterByAuthors(products, [])).toHaveLength(2);
+		expect(filterByAuthors(products, ["COOL-DEV"])).toEqual([products[0]!]);
+		expect(filterByAuthors(products, ["other person"])).toEqual([products[1]!]);
+		expect(filterByAuthors(products, ["nobody"])).toEqual([]);
 	});
-	test("bundleGamesToGames keeps only claimed rows", () => {
-		const games = bundleGamesToGames([
+	const item = (author: string, itchSlug: string, title: string, key: string) =>
+		({
+			...product(author),
+			title,
+			slug: title,
+			itchSlug,
+			key,
+			dlurl: `https://${author}.itch.io/${itchSlug}/download/${key}`,
+			productUrl: `https://${author}.itch.io/${itchSlug}`,
+		}) satisfies Product;
+	const library = [
+		item("cool-dev", "space-game", "Space Game", "K1"),
+		item("other", "space-game", "Space Game", "K2"),
+		item("cool-dev", "moon-pack", "Moon Pack (v2)", "K3"),
+	];
+	test("parseProductSelector reads URLs, author/game and free text", () => {
+		expect(
+			parseProductSelector("https://cool-dev.itch.io/space-game/download/K1"),
+		).toEqual({
+			text: "https://cool-dev.itch.io/space-game/download/K1",
+			author: "cool-dev",
+			slug: "space-game",
+			key: "K1",
+		});
+		expect(
+			parseProductSelector("https://cool-dev.itch.io/space-game/"),
+		).toEqual({
+			text: "https://cool-dev.itch.io/space-game/",
+			author: "cool-dev",
+			slug: "space-game",
+			key: undefined,
+		});
+		expect(parseProductSelector("cool-dev/moon-pack")).toEqual({
+			text: "cool-dev/moon-pack",
+			author: "cool-dev",
+			slug: "moon-pack",
+		});
+		expect(parseProductSelector("Moon Pack")).toEqual({ text: "Moon Pack" });
+	});
+	test("resolveProductSelectors matches by key, author/slug, title or slug", () => {
+		expect(
+			resolveProductSelectors(
+				[
+					"https://cool-dev.itch.io/space-game/download/K1",
+					"https://OTHER.itch.io/space-game?foo#bar",
+					"cool-dev/moon-pack",
+					"moon pack v2",
+					"Moon-Pack",
+				],
+				library,
+			),
+		).toEqual([library[0]!, library[1]!, library[2]!]);
+	});
+	test("resolveProductSelectors rejects unknown and ambiguous selectors", () => {
+		expect(() => resolveProductSelectors(["nobody/nothing"], library)).toThrow(
+			/Unknown product\(s\): "nobody\/nothing"/,
+		);
+		expect(() =>
+			resolveProductSelectors(["https://itch.io/bundle/download/x"], library),
+		).toThrow(/Unknown product/);
+		expect(() => resolveProductSelectors(["Space Game"], library)).toThrow(
+			/Ambiguous product\(s\): "Space Game" matches cool-dev\/space-game, other\/space-game/,
+		);
+	});
+	test("bundleProductsToProducts keeps only claimed rows", () => {
+		const products = bundleProductsToProducts([
 			{
 				title: "A",
-				gameUrl: "https://a.itch.io/a",
+				productUrl: "https://a.itch.io/a",
 				author: "a",
 				authorName: "A",
 				claimed: true,
@@ -159,14 +228,14 @@ describe("filter", () => {
 			},
 			{
 				title: "B",
-				gameUrl: "https://b.itch.io/b",
+				productUrl: "https://b.itch.io/b",
 				author: "b",
 				authorName: "B",
 				claimed: false,
 			},
 		]);
-		expect(games).toHaveLength(1);
-		expect(games[0]).toMatchObject({
+		expect(products).toHaveLength(1);
+		expect(products[0]).toMatchObject({
 			title: "A",
 			key: "K",
 			itchSlug: "a",
@@ -201,6 +270,16 @@ describe("Tracker", () => {
 		expect(selectionFingerprint(["b", "A"], [])).toBe(
 			selectionFingerprint(["a", "B"], []),
 		);
+		expect(selectionFingerprint([], [], ["y/b", "x/a"])).toBe(
+			selectionFingerprint([], [], ["x/a", "y/b"]),
+		);
+	});
+	test("fingerprint without products keeps the pre-products format", () => {
+		expect(selectionFingerprint(["B"], ["x"])).toBe("bundles=b|authors=x");
+		expect(selectionFingerprint(["B"], ["x"], [])).toBe("bundles=b|authors=x");
+		expect(selectionFingerprint([], [], ["x/a"])).not.toBe(
+			selectionFingerprint([], [], []),
+		);
 	});
 });
 
@@ -221,18 +300,23 @@ describe("loadConfig", () => {
 				download_manifest: true,
 				authors: ["x"],
 				bundles: [],
+				products: [],
 			});
 			expect(cfg!.download_directory.endsWith("downloads")).toBe(true);
 
 			await Bun.write(
 				path,
-				'create_pdf = "OFF"\nbundles = "a, b"\ncreate_log = false\n',
+				'create_pdf = "OFF"\nbundles = "a, b"\ncreate_log = false\nproducts = [" x/a ", ""]\n',
 			);
 			expect(await loadConfig(path)).toMatchObject({
 				create_log: false,
 				create_pdf: false,
 				bundles: ["a", "b"],
+				products: ["x/a"],
 			});
+			expect(
+				await loadConfig(path, { products: ["https://y.itch.io/b"] }),
+			).toMatchObject({ products: ["https://y.itch.io/b"] });
 
 			await Bun.write(path, "create_pdf = 3\n");
 			await expect(loadConfig(path)).rejects.toBeInstanceOf(ConfigError);
