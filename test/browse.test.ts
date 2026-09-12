@@ -139,6 +139,15 @@ describe("library scan", () => {
 			);
 			await Bun.write(join(root, "with-manifest", "unpacked", "x.txt"), "1234");
 			await Bun.write(join(root, "with-manifest", ".DS_Store"), "junk");
+			await Bun.write(join(root, "with-manifest", "Thumbs.db"), "junk");
+			await Bun.write(
+				join(root, "with-manifest", "unpacked", "._x.txt"),
+				"junk",
+			);
+			await Bun.write(
+				join(root, "with-manifest", "unpacked", "__MACOSX", "x"),
+				"junk",
+			);
 			await mkdir(join(root, "bare-item"));
 			await Bun.write(join(root, "bare-item", "1_pack_20240101.zip"), "zip!");
 			await Bun.write(join(root, "stray-file.txt"), "ignored");
@@ -162,9 +171,16 @@ describe("library scan", () => {
 			expect(full?.captures[0]?.png?.url).toContain("20260910");
 			expect(full?.captures[0]?.pdf).toBeNull();
 			expect(full?.files.map((f) => f.name)).not.toContain(".DS_Store");
+			expect(full?.files.map((f) => f.name)).not.toContain("Thumbs.db");
 			const folder = full?.files.find((f) => f.name === "unpacked");
 			expect(folder?.kind).toBe("folder");
 			expect(folder?.size).toBe(4);
+			const tree = await scanItemTree(root, "with-manifest");
+			expect(
+				tree.files
+					.find((f) => f.name === "unpacked")
+					?.children?.map((f) => f.name),
+			).toEqual(["x.txt"]);
 			expect(folder?.url).toBeNull();
 
 			expect(bare?.title).toBe("Bare Item");
@@ -409,7 +425,8 @@ describe("served manifests", () => {
 					downloadKey: "SECRET",
 					bundles: [{ name: "B", key: "KEY", url: "https://itch.io/b/KEY" }],
 					tags: ["2D"],
-					files: ["pack.zip"],
+					// an older manifest may list system files: not any more
+					files: [".DS_Store", "pack.zip", "Thumbs.db"],
 				}),
 			);
 			const text = new TextDecoder().decode(
@@ -423,6 +440,7 @@ describe("served manifests", () => {
 			expect(parsed.urls).toEqual({ page: "https://a.itch.io/pack" });
 			expect(parsed.bundles).toEqual([{ name: "B" }]);
 			expect(parsed.tags).toEqual(["2D"]);
+			expect(parsed.files).toEqual(["pack.zip"]);
 			expect(text.endsWith("}\n")).toBe(true);
 
 			await Bun.write(path, "not json {");

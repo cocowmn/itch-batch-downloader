@@ -100,13 +100,17 @@ describe("extractZip", () => {
 			await writeZip(join(dir, "game-v3.zip"), {
 				"game/game.exe": "EXE",
 				"game/data/level.dat": "DAT",
+				"game/.DS_Store": "junk",
+				"game/data/._level.dat": "junk",
 				"__MACOSX/game/._game.exe": "junk",
+				".DS_Store": "junk",
 			});
 			expect(await extractZip(join(dir, "game-v3.zip"))).toEqual({
 				created: "game",
 			});
 			expect(await listing(dir)).toEqual(["game", "game-v3.zip"]);
 			expect(await listing(join(dir, "game"))).toEqual(["data", "game.exe"]);
+			expect(await listing(join(dir, "game", "data"))).toEqual(["level.dat"]);
 
 			await writeZip(join(dir, "notes.zip"), { "notes.md": "# hi" });
 			expect(await extractZip(join(dir, "notes.zip"))).toEqual({

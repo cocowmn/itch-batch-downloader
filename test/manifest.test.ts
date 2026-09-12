@@ -91,6 +91,10 @@ describe("manifest", () => {
 			await Bun.write(join(dir, "b.zip"), "x");
 			await Bun.write(join(dir, "a.png"), "x");
 			await Bun.write(join(dir, "c.zip.incomplete"), "x");
+			await Bun.write(join(dir, ".DS_Store"), "x");
+			await Bun.write(join(dir, "._a.png"), "x");
+			await Bun.write(join(dir, "Thumbs.db"), "x");
+			await Bun.write(join(dir, ".itchio"), "{}");
 			const path = await writeManifest(product, html, dir);
 			expect(path).toBe(join(dir, "characterpack1_manifest.json"));
 			const written = await Bun.file(path).json();

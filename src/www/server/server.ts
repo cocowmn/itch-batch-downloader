@@ -21,6 +21,7 @@ import type {
 } from "../../models/library.ts";
 import type { Manifest } from "../../models/manifest.ts";
 import { log } from "../../utils/log.ts";
+import { isSystemFile } from "../../utils/system-files.ts";
 import ui from "../client/index.html";
 import { AdminSessions, HiddenItems } from "./admin.ts";
 import { FetchJobs, JobError } from "./jobs.ts";
@@ -179,7 +180,13 @@ async function serveManifest(path: string): Promise<Response> {
 async function serveFile(ctx: ServerContext, req: Request): Promise<Response> {
 	const rel = parseFilePath(new URL(req.url).pathname);
 	const path = rel && resolvePath(ctx.root, rel);
-	if (!rel || !path || (await ctx.concealed(req, rel)))
+	// Hidden and system files are never content: not listed, and not served.
+	if (
+		!rel ||
+		!path ||
+		rel.some((s) => s.startsWith(".") || isSystemFile(s)) ||
+		(await ctx.concealed(req, rel))
+	)
 		return new Response("Not found", { status: 404 });
 	if (path.endsWith(MANIFEST_SUFFIX)) return serveManifest(path);
 	const file = Bun.file(path);

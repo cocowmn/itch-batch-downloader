@@ -15,11 +15,10 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { Unzip, UnzipInflate } from "fflate";
+import { isSystemFile } from "../../utils/system-files.ts";
 
 export class UnzipError extends Error {}
 
-/** Finder's resource-fork sidecars; never wanted on extraction. */
-const IGNORED_TOP_LEVEL = new Set(["__MACOSX"]);
 /** Bytes of the archive read per push. */
 const CHUNK = 1024 * 1024;
 /** Zip compression methods fflate can expand: stored and deflate. */
@@ -134,7 +133,9 @@ async function unpack(
 			return;
 		}
 		const [top] = segments;
-		if (!top || IGNORED_TOP_LEVEL.has(top)) return;
+		// System files (`__MACOSX/`, `.DS_Store`, `._*`) at any depth are not
+		// extracted, and do not count as a top-level entry of the archive.
+		if (!top || segments.some(isSystemFile)) return;
 		const isDirectory = file.name.endsWith("/");
 		const path = join(target, ...segments);
 		topLevel.add(top);

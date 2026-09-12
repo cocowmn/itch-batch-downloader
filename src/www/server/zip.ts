@@ -7,6 +7,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { configure, ZipWriter } from "@zip.js/zip.js";
+import { isIgnoredFile } from "../../utils/system-files.ts";
 
 // No worker threads: the compiled binary cannot ship zip.js's worker script,
 // and deflate goes through Bun's native CompressionStream anyway.
@@ -40,7 +41,7 @@ const STORED = new Set([
 ]);
 
 export interface ZipOptions {
-	/** Skip an entry by its file name. Default: hidden and `.incomplete` files. */
+	/** Skip an entry by its file name. Default: hidden, system and `.incomplete` files. */
 	exclude?: (name: string) => boolean;
 	/** Name of the top-level folder inside the archive. Default: `basename(dir)`. */
 	rootName?: string;
@@ -61,7 +62,7 @@ interface Entry {
 }
 
 export function defaultExclude(name: string): boolean {
-	return name.startsWith(".") || name.endsWith(".incomplete");
+	return isIgnoredFile(name);
 }
 
 /** Every entry below `dir`, depth first, folders before their contents. */

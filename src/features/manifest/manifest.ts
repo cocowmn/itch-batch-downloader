@@ -10,6 +10,7 @@ import type {
 	ProductMetadata,
 } from "../../models/manifest.ts";
 import type { Bundle, Product } from "../../models/product.ts";
+import { isIgnoredFile } from "../../utils/system-files.ts";
 import { findCoverImage } from "../artwork/artwork.ts";
 
 export const MANIFEST_SUFFIX = "_manifest.json";
@@ -85,7 +86,8 @@ export interface ManifestOptions {
 /**
  * A manifest without the parts that only `manifest_include_keys` writes
  * (the download key, the download page URL and the bundles' keys): what
- * the download browser sends to clients.
+ * the download browser sends to clients. System files that a manifest
+ * written by an older version may list are dropped too.
  */
 export function redactManifest(manifest: Manifest): Manifest {
 	const { downloadKey: _key, ...rest } = manifest;
@@ -93,6 +95,7 @@ export function redactManifest(manifest: Manifest): Manifest {
 		...rest,
 		urls: { page: manifest.urls?.page ?? "" },
 		bundles: (manifest.bundles ?? []).map((b) => ({ name: b.name })),
+		files: (manifest.files ?? []).filter((f) => !isIgnoredFile(f)),
 	};
 }
 
@@ -142,12 +145,7 @@ export async function writeManifest(
 	);
 	const entries = await readdir(dir).catch(() => [] as string[]);
 	const files = entries
-		.filter(
-			(f) =>
-				!f.endsWith(".incomplete") &&
-				!f.endsWith(MANIFEST_SUFFIX) &&
-				!f.startsWith("."),
-		)
+		.filter((f) => !f.endsWith(MANIFEST_SUFFIX) && !isIgnoredFile(f))
 		.sort();
 	const manifest = buildManifest(
 		product,

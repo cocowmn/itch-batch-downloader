@@ -17,6 +17,7 @@ import {
 } from "../src/features/selection/selection.ts";
 import type { Product } from "../src/models/product.ts";
 import { comparable, slugify } from "../src/utils/slugify.ts";
+import { isIgnoredFile, isSystemFile } from "../src/utils/system-files.ts";
 import { compactTimestamp } from "../src/utils/time.ts";
 
 describe("slugify", () => {
@@ -35,6 +36,30 @@ describe("slugify", () => {
 		expect(comparable("TTRPGs for Trans Rights in Texas!")).toBe(
 			"ttrpgs-for-trans-rights-in-texas",
 		);
+	});
+});
+
+describe("system files", () => {
+	test("Finder and Explorer leftovers, at any case", () => {
+		for (const name of [
+			".DS_Store",
+			".ds_store",
+			"._readme.md",
+			"__MACOSX",
+			"Thumbs.db",
+			"thumbs.db",
+			"desktop.ini",
+		])
+			expect(isSystemFile(name)).toBe(true);
+		for (const name of ["readme.md", "_private.txt", "Desktop.png", ".itchio"])
+			expect(isSystemFile(name)).toBe(false);
+	});
+
+	test("ignored: system, hidden and partial files", () => {
+		expect(isIgnoredFile("Thumbs.db")).toBe(true);
+		expect(isIgnoredFile(".itchio")).toBe(true);
+		expect(isIgnoredFile("big.zip.incomplete")).toBe(true);
+		expect(isIgnoredFile("big.zip")).toBe(false);
 	});
 });
 

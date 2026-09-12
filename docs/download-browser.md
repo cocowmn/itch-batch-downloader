@@ -34,7 +34,7 @@ Clicking an item slides in its details: cover artwork, description, tags, the "M
 
 The folder icon next to *Open on itch.io* is the download button. When both ways to download are available it opens a small menu:
 
-- **Download folder** zips the item's directory on the fly and streams it to you (`.incomplete` and hidden files are left out; the manifest goes in without its keys). There is no size cap — archives past 4 GB are written in Zip64.
+- **Download folder** zips the item's directory on the fly and streams it to you (`.incomplete`, hidden and system files such as `.DS_Store` or `Thumbs.db` are left out; the manifest goes in without its keys). There is no size cap — archives past 4 GB are written in Zip64.
 - **Download from itch.io** runs the downloader for that one item, on the server, into a temporary directory, and hands the result over as a fresh zip. Progress shows in an overlay and can be cancelled. Your library on disk is not touched.
 
 ![Download menu](screenshots/download-menu.png)

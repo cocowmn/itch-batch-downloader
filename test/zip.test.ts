@@ -35,6 +35,10 @@ describe("zipDirectory", () => {
 			await Bun.write(join(dir, "pack", "b.zip"), "already zipped");
 			await Bun.write(join(dir, "big.zip.incomplete"), "partial");
 			await Bun.write(join(dir, ".itchio"), "{}");
+			await Bun.write(join(dir, ".DS_Store"), "junk");
+			await Bun.write(join(dir, "pack", "Thumbs.db"), "junk");
+			await Bun.write(join(dir, "pack", "._b.zip"), "junk");
+			await Bun.write(join(dir, "pack", "__MACOSX", "._a.png"), "junk");
 			await mkdir(join(dir, "empty"));
 
 			const bytes = await collect(await zipDirectory(dir));

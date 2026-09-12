@@ -24,6 +24,7 @@ import type {
 	LibraryResponse,
 } from "../../models/library.ts";
 import type { Manifest } from "../../models/manifest.ts";
+import { isSystemFile } from "../../utils/system-files.ts";
 
 const KINDS: Record<string, FileKind> = {
 	zip: "archive",
@@ -167,7 +168,9 @@ async function scanTree(
 	}
 	const files: LibraryFile[] = [];
 	for (const name of names.sort((a, b) => a.localeCompare(b))) {
-		if (name.startsWith(".")) continue;
+		// Hidden and system files are not content (`.incomplete` ones are
+		// listed: they show what is still on its way).
+		if (name.startsWith(".") || isSystemFile(name)) continue;
 		if (scan.budget <= 0) {
 			scan.truncated = true;
 			break;
