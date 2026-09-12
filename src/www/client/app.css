@@ -166,7 +166,7 @@ button {
 	white-space: nowrap;
 }
 
-/* Long-press target for the admin sign-in: no text selection or callout. */
+/* The library mark opens the library menu (admin sign-in). */
 .brand-mark {
 	display: inline-flex;
 	padding: 6px;
@@ -179,7 +179,12 @@ button {
 	transition: background 0.15s;
 }
 
-.brand-mark:active {
+.brand-mark:hover {
+	background: var(--bg-hover);
+}
+
+.brand-mark:active,
+.brand-mark[aria-expanded="true"] {
 	background: var(--accent-soft);
 }
 
@@ -1004,6 +1009,51 @@ kbd {
 	width: 100%;
 }
 
+/* Icon-only buttons: square, or a little wider with a menu chevron */
+.button.icon-only {
+	gap: 2px;
+	padding: 0 8px;
+}
+
+.button.icon-only .icon {
+	width: 16px;
+	height: 16px;
+}
+
+.button.has-menu .icon-chevron-down {
+	width: 13px;
+	height: 13px;
+	margin-right: -3px;
+	color: var(--muted);
+	transition: transform 0.15s;
+}
+
+.button[aria-expanded="true"] {
+	background: var(--bg-hover);
+	border-color: var(--accent-line);
+}
+
+.button[aria-expanded="true"] .icon-chevron-down {
+	transform: rotate(180deg);
+}
+
+/* `busyIcon`: the icon while idle, a spinner while a `.busy` ancestor works */
+.busy-icon {
+	display: none;
+}
+
+.busy .idle-icon {
+	display: none;
+}
+
+.busy .busy-icon {
+	display: inline-flex;
+}
+
+.busy-icon .icon {
+	animation: spin 0.8s linear infinite;
+}
+
 /* Admin: the delete button at the very bottom of the inspector */
 .danger-zone {
 	display: flex;
@@ -1260,6 +1310,64 @@ kbd {
 	opacity: 1;
 }
 
+/* Admin: a zip row's icon is its unzip button. The three icons (archive,
+   opened package, spinner) sit on top of each other and cross-fade. */
+.file-icon-action {
+	position: relative;
+	display: inline-grid;
+	place-items: center;
+	width: 22px;
+	height: 22px;
+	margin: -3px;
+	border-radius: 5px;
+	transition: background 0.15s;
+}
+
+.file-icon-action .icon-wrap {
+	grid-area: 1 / 1;
+	transition: opacity 0.15s;
+}
+
+.file-icon-action .icon {
+	transition: color 0.15s;
+}
+
+.file-icon-action .zip-hover,
+.file-icon-action .zip-busy {
+	opacity: 0;
+}
+
+.file-icon-action:hover:not(.busy),
+.file-icon-action:focus-visible:not(.busy) {
+	background: var(--accent-soft);
+	outline: none;
+}
+
+.file-icon-action:hover:not(.busy) .icon,
+.file-icon-action:focus-visible:not(.busy) .icon {
+	color: var(--accent);
+}
+
+.file-icon-action:hover:not(.busy) .zip-idle,
+.file-icon-action:focus-visible:not(.busy) .zip-idle,
+.file-icon-action.busy .zip-idle {
+	opacity: 0;
+}
+
+.file-icon-action:hover:not(.busy) .zip-hover,
+.file-icon-action:focus-visible:not(.busy) .zip-hover,
+.file-icon-action.busy .zip-busy {
+	opacity: 1;
+}
+
+.file-icon-action.busy {
+	cursor: progress;
+}
+
+.file-icon-action.busy .zip-busy .icon {
+	animation: spin 0.8s linear infinite;
+}
+
 .file.dim {
 	opacity: 0.55;
 }
@@ -1452,6 +1560,112 @@ kbd {
 		opacity: 0;
 		transform: translate(-50%, 6px);
 	}
+}
+
+/* Popovers: floating panels anchored to an element (menus, and tooltips
+   later). Above the inspector and the viewer, below modal dialogs. */
+.popover {
+	position: fixed;
+	z-index: 25;
+	min-width: 160px;
+	max-width: min(320px, calc(100vw - 16px));
+	overflow: auto;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	background: var(--bg-panel);
+	box-shadow: var(--shadow);
+	outline: none;
+	transform-origin: top left;
+	animation: popover-in 0.12s ease-out;
+}
+
+.popover[data-side="top"] {
+	transform-origin: bottom left;
+}
+
+@keyframes popover-in {
+	from {
+		opacity: 0;
+		transform: scale(0.96) translateY(-2px);
+	}
+}
+
+/* Context menu on top of the popover */
+.menu-list {
+	display: flex;
+	flex-direction: column;
+	padding: 4px;
+}
+
+.menu-item {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	width: 100%;
+	padding: 7px 10px 7px 8px;
+	border-radius: 6px;
+	color: var(--text);
+	font-size: 13px;
+	text-align: left;
+	text-decoration: none;
+	white-space: nowrap;
+	cursor: pointer;
+	outline: none;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible,
+.menu-item:focus {
+	background: var(--bg-hover);
+	text-decoration: none;
+}
+
+.menu-item .icon,
+.menu-icon-gap {
+	width: 16px;
+	height: 16px;
+	color: var(--muted);
+}
+
+.menu-item:hover .icon,
+.menu-item:focus .icon {
+	color: var(--text-soft);
+}
+
+.menu-label {
+	flex: 1;
+}
+
+.menu-item small {
+	font-family: var(--mono);
+	font-size: 11px;
+	color: var(--muted);
+	margin-left: 8px;
+}
+
+.menu-item.danger,
+.menu-item.danger .icon {
+	color: var(--danger);
+}
+
+.menu-item.danger:hover,
+.menu-item.danger:focus {
+	background: rgba(248, 113, 113, 0.12);
+}
+
+.menu-item[aria-disabled="true"] {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.menu-item[aria-disabled="true"]:hover {
+	background: none;
+}
+
+.menu-separator {
+	height: 1px;
+	margin: 4px 6px;
+	background: var(--line);
 }
 
 /* File viewer (lightbox) */
@@ -2384,7 +2598,12 @@ body.viewer-open {
 	.results-inner,
 	.inspector,
 	.inspector.open,
-	.card {
+	.card,
+	.file-icon-action .icon-wrap {
 		transition: none;
+	}
+
+	.popover {
+		animation: none;
 	}
 }

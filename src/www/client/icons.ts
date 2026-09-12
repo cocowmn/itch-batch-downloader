@@ -79,6 +79,9 @@ import loaderCircle from "lucide-static/icons/loader-circle.svg" with {
 };
 import lock from "lucide-static/icons/lock.svg" with { type: "text" };
 import logOut from "lucide-static/icons/log-out.svg" with { type: "text" };
+import packageOpen from "lucide-static/icons/package-open.svg" with {
+	type: "text",
+};
 import pipette from "lucide-static/icons/pipette.svg" with { type: "text" };
 import refreshCw from "lucide-static/icons/refresh-cw.svg" with {
 	type: "text",
@@ -144,6 +147,7 @@ const ICONS: Record<string, string> = {
 	list,
 	lock,
 	"log-out": logOut,
+	"package-open": packageOpen,
 	pipette,
 	"refresh-cw": refreshCw,
 	search,
@@ -175,6 +179,18 @@ export function icon(name: string): HTMLElement {
 	span.className = "icon-wrap";
 	span.innerHTML = iconSvg(name);
 	return span;
+}
+
+/**
+ * An icon followed by a spinner: while an ancestor has the `busy` class the
+ * icon is hidden and the spinner shown (see `.idle-icon` / `.busy-icon`).
+ */
+export function busyIcon(name: string): HTMLElement[] {
+	const idle = icon(name);
+	idle.classList.add("idle-icon");
+	const spinner = icon("loader-circle");
+	spinner.classList.add("busy-icon");
+	return [idle, spinner];
 }
 
 /** Fill every `[data-icon]` placeholder of `root` with its icon. */

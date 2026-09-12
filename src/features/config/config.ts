@@ -106,9 +106,9 @@ authors = []
 # Optional path to the yt-dlp executable.
 # yt_dlp_path = "yt-dlp"
 
-# Password for the admin features of the download browser (hiding and
-# deleting items). A random one is generated when this file is created;
-# change it to anything you like. Long-press the library icon in the
+# Password for the admin features of the download browser (hiding,
+# deleting and unzipping items). A random one is generated when this file
+# is created; change it to anything you like. Click the library icon in the
 # browser's top bar to sign in. Remove the line to turn admin features off.
 admin_password = "{admin_password}"
 `;

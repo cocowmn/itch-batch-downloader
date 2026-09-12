@@ -13,11 +13,16 @@
 
     <header class="topbar">
       <div class="brand">
-        <span
+        <button
+          type="button"
           class="brand-mark"
-          data-icon="library-big"
-          title="Hold to sign in as admin"
-        ></span>
+          id="brand-menu"
+          title="Library menu"
+          aria-label="Library menu"
+          aria-haspopup="menu"
+        >
+          <span data-icon="library-big"></span>
+        </button>
         <span class="brand-name">itch downloads</span>
         <span class="brand-stats" id="stats"></span>
       </div>

@@ -4,7 +4,7 @@
 
 import type { LibraryFile } from "../../models/library.ts";
 import { formatBytes, formatDate, h } from "./dom.ts";
-import { fileIcon, icon } from "./icons.ts";
+import { busyIcon, fileIcon, icon } from "./icons.ts";
 import {
 	extension,
 	highlightJson,
@@ -19,6 +19,8 @@ export interface ViewerContext {
 	reveal: ((file: LibraryFile) => void) | null;
 	/** Name of the file manager for button labels. */
 	fileManager: string;
+	/** Extract a zip next to itself; null unless signed in as admin. */
+	unzip: ((file: LibraryFile) => Promise<void>) | null;
 }
 
 type Zoom = "fit" | 1 | 2 | 4 | 8;
@@ -617,6 +619,31 @@ async function renderText(
 
 function renderCard(v: Viewer, file: LibraryFile): HTMLElement {
 	const ext = extension(file.name);
+	const unzip = v.ctx.unzip;
+	const unzipButton =
+		unzip && ext === "zip"
+			? h(
+					"button",
+					{
+						type: "button",
+						class: "button",
+						title: "Extract the archive next to itself; nothing is overwritten",
+						onclick: async (ev: Event) => {
+							const button = ev.currentTarget as HTMLButtonElement;
+							button.classList.add("busy");
+							button.disabled = true;
+							try {
+								await unzip(file);
+							} finally {
+								button.classList.remove("busy");
+								button.disabled = false;
+							}
+						},
+					},
+					...busyIcon("package-open"),
+					"Unzip archive",
+				)
+			: null;
 	return h(
 		"div",
 		{ class: "viewer-card" },
@@ -644,6 +671,7 @@ function renderCard(v: Viewer, file: LibraryFile): HTMLElement {
 					"Download",
 				)
 			: null,
+		unzipButton,
 		v.ctx.reveal
 			? h(
 					"button",

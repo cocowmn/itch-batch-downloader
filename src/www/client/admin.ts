@@ -1,4 +1,4 @@
-// Admin sign-in (long-press on the library mark) and the admin API calls.
+// Admin sign-in (from the library mark's menu) and the admin API calls.
 // The session is a cookie the server sets on sign-in; `checkAdmin` asks
 // whether it is still valid (it is not after a server restart).
 
@@ -6,9 +6,6 @@ import type { AdminStatus } from "../../models/library.ts";
 import { openDialog } from "./dialog.ts";
 import { h } from "./dom.ts";
 import { icon } from "./icons.ts";
-
-/** Milliseconds a press has to last to count as a long press. */
-const LONG_PRESS_MS = 600;
 
 export class AdminError extends Error {
 	constructor(
@@ -63,34 +60,20 @@ export const adminApi = {
 		}),
 	deleteItem: (directory: string) =>
 		call<{ ok: true }>(itemUrl(directory), { method: "DELETE" }),
+	/** Extract a zip next to itself; resolves with the name it created. */
+	unzip: (directory: string, path: string) =>
+		call<{ ok: true; created: string }>(
+			`/api/admin/unzip/${encodePath(`${directory}/${path}`)}`,
+			{ method: "POST" },
+		),
 };
 
-function itemUrl(directory: string): string {
-	return `/api/admin/item/${directory.split("/").map(encodeURIComponent).join("/")}`;
+function encodePath(path: string): string {
+	return path.split("/").map(encodeURIComponent).join("/");
 }
 
-/**
- * Call `onLongPress` when `el` is held for LONG_PRESS_MS. Moving away or
- * letting go earlier cancels; the context menu a phone would open on a long
- * press is suppressed so the dialog is what comes up.
- */
-export function onLongPress(el: HTMLElement, onLongPress: () => void): void {
-	let timer = 0;
-	const cancel = () => {
-		clearTimeout(timer);
-		timer = 0;
-	};
-	el.addEventListener("pointerdown", (ev) => {
-		if (ev.button !== 0) return;
-		cancel();
-		timer = window.setTimeout(() => {
-			timer = 0;
-			onLongPress();
-		}, LONG_PRESS_MS);
-	});
-	for (const type of ["pointerup", "pointercancel", "pointerleave"] as const)
-		el.addEventListener(type, cancel);
-	el.addEventListener("contextmenu", (ev) => ev.preventDefault());
+function itemUrl(directory: string): string {
+	return `/api/admin/item/${encodePath(directory)}`;
 }
 
 export interface AdminDialogContext {
@@ -100,7 +83,7 @@ export interface AdminDialogContext {
 	onSignedOut(): void;
 }
 
-/** The dialog behind the long press: sign in, or sign out when already in. */
+/** The dialog behind the menu entry: sign in, or sign out when already in. */
 export function openAdminDialog(ctx: AdminDialogContext): void {
 	if (ctx.admin) {
 		openSignOutDialog(ctx);
@@ -116,7 +99,7 @@ export function openAdminDialog(ctx: AdminDialogContext): void {
 				{ class: "dialog-text" },
 				"Set ",
 				h("code", {}, "admin_password"),
-				" in the configuration file and restart the download browser to hide or delete items.",
+				" in the configuration file and restart the download browser to hide, delete or unzip items.",
 			),
 			h(
 				"div",
@@ -236,7 +219,7 @@ function openSignOutDialog(ctx: AdminDialogContext): void {
 		h(
 			"p",
 			{ class: "dialog-text" },
-			"Items can be hidden from the details panel and hidden items shown with the eye button in the top bar. The session ends when the browser or the server closes.",
+			"Items can be hidden, deleted and their archives unzipped from the details panel; hidden items show with the eye button in the top bar. The session ends when the browser or the server closes.",
 		),
 		h(
 			"div",

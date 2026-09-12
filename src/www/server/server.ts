@@ -4,7 +4,7 @@
 // manifest files are served without them (see redactItem / serveManifest),
 // so `--host` can open the browser to the network. With `admin_password`
 // set, a signed-in admin can hide items (invisible and unreachable for
-// everyone else) and delete them; see admin.ts.
+// everyone else), delete them and unzip archives in place; see admin.ts.
 
 import { rm, rmdir } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
@@ -25,6 +25,7 @@ import ui from "../client/index.html";
 import { AdminSessions, HiddenItems } from "./admin.ts";
 import { FetchJobs, JobError } from "./jobs.ts";
 import { scanItemTree, scanLibrary } from "./library.ts";
+import { extractZip, UnzipError } from "./unzip.ts";
 import { ZipTooLargeError, zipDirectory } from "./zip.ts";
 
 export interface BrowserOptions {
@@ -85,8 +86,8 @@ export function applyHidden(
 
 /**
  * The decoded segments of a `/files/<dir>/<name...>` (or `/api/item/<dir>`,
- * `/api/zip/<dir>`) path, or null when a segment is empty, `.`/`..` or
- * otherwise unusable. Files need at least `dir/name`; `allowDirectory`
+ * `/api/zip/<dir>`, `/api/admin/unzip/<dir>/<name...>`) path, or null when a
+ * segment is empty, `.`/`..` or otherwise unusable. Files need at least `dir/name`; `allowDirectory`
  * accepts a bare item directory (used by reveal and the item/zip routes,
  * never by the file route).
  */
@@ -98,7 +99,7 @@ export function parseFilePath(
 	try {
 		rel = pathname
 			.replace(
-				/^\/(?:files|api\/item|api\/zip|api\/fetch|api\/admin\/item)\//,
+				/^\/(?:files|api\/item|api\/zip|api\/fetch|api\/admin\/item|api\/admin\/unzip)\//,
 				"",
 			)
 			.split("/")
@@ -403,6 +404,38 @@ function listen(ctx: ServerContext) {
 					return Response.json({ ok: true }, { headers: NO_STORE });
 				},
 			},
+			// Admin: extract a zip next to itself; answers when it is done.
+			"/api/admin/unzip/*": {
+				POST: async (req, server) => {
+					const denied = requireAdmin(req);
+					if (denied) return denied;
+					const pathname = new URL(req.url).pathname;
+					const path = resolveFilePath(root, pathname);
+					if (!path?.toLowerCase().endsWith(".zip"))
+						return new Response("Not found", { status: 404 });
+					const s = await Bun.file(path)
+						.stat()
+						.catch(() => null);
+					if (!s?.isFile()) return new Response("Not found", { status: 404 });
+					const rel = parseFilePath(pathname)?.join("/") ?? path;
+					// A large archive takes longer than the default idle timeout.
+					server.timeout(req, 0);
+					try {
+						const { created } = await extractZip(path);
+						log.info(`Admin unzipped '${rel}' to '${created}'`);
+						return Response.json({ ok: true, created }, { headers: NO_STORE });
+					} catch (err) {
+						if (err instanceof UnzipError) {
+							log.warn(`Unzipping '${rel}' failed: ${err.message}`);
+							return Response.json(
+								{ error: err.message },
+								{ status: 422, headers: NO_STORE },
+							);
+						}
+						throw err;
+					}
+				},
+			},
 			// "Download from itch.io": fetch an item again, server-side, as a job.
 			"/api/fetch/current": () =>
 				Response.json(ctx.jobs.currentStatus(), { headers: NO_STORE }),
@@ -548,11 +581,11 @@ export async function serveDownloadBrowser(
 	}
 	if (admin.enabled) {
 		log.info(
-			"Admin features are on: long-press the library icon in the top bar to sign in.",
+			"Admin features are on: click the library icon in the top bar to sign in.",
 		);
 	} else {
 		log.info(
-			"Admin features are off: set admin_password in the config file to hide or delete items.",
+			"Admin features are off: set admin_password in the config file to hide, delete or unzip items.",
 		);
 	}
 	if (opts.open !== false) openInBrowser(url);

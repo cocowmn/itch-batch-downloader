@@ -10,12 +10,13 @@ import type {
 	LibraryItem,
 	LibraryResponse,
 } from "../../models/library.ts";
-import { AdminError, adminApi, onLongPress, openAdminDialog } from "./admin.ts";
+import { AdminError, adminApi, openAdminDialog } from "./admin.ts";
 import { confirmDialog } from "./dialog.ts";
 import { byId, formatBytes, formatDate, formatDay, h } from "./dom.ts";
 import { matchQuery, type SearchField } from "./fuzzy.ts";
-import { fileIcon, hydrateIcons, icon, iconSvg } from "./icons.ts";
-import { viewerMode } from "./text.ts";
+import { busyIcon, fileIcon, hydrateIcons, icon, iconSvg } from "./icons.ts";
+import { type MenuItem, toggleMenu } from "./menu.ts";
+import { extension, viewerMode } from "./text.ts";
 import { openViewer, type ViewerContext } from "./viewer.ts";
 
 type View = "grid" | "list" | "gallery";
@@ -77,6 +78,11 @@ const isLocal = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(
 
 function authorLabel(item: LibraryItem): string {
 	return item.author?.name || item.author?.slug || "";
+}
+
+/** A directory or file path as URL path segments. */
+function encodePath(path: string): string {
+	return path.split("/").map(encodeURIComponent).join("/");
 }
 
 // ---------------------------------------------------------------------------
@@ -706,8 +712,10 @@ function renderInspector(force = false): void {
 						"Open on itch.io",
 					)
 				: null,
-			zipButton(item),
-			fetchButton(item),
+			downloadButton(item),
+			state.admin && topLevelZips(item).length
+				? unzipAllButton(item, topLevelZips(item))
+				: null,
 			isLocal
 				? h(
 						"button",
@@ -1102,32 +1110,207 @@ function renderCaptures(item: LibraryItem): HTMLElement {
 /** fflate writes 32-bit zips: the server refuses folders above 4 GB. */
 const ZIP_LIMIT = 4 * 1024 ** 3 - 1;
 
-/** "Download folder": the item directory streamed as a zip. */
-function zipButton(item: LibraryItem): HTMLElement {
-	const tooBig = item.size > ZIP_LIMIT;
-	const label = [icon("folder-down"), "Download folder"];
-	if (tooBig) {
-		return h(
-			"span",
+const FETCH_TITLE =
+	"Fetch a fresh copy from itch.io with the downloader's settings and get it as a zip";
+
+/**
+ * The two ways to download an item: "Download folder" (the directory
+ * streamed as a zip; not above the 4 GB zip limit) and "Download from
+ * itch.io" (only with a fetchable manifest). Both possible: one icon button
+ * with a chevron that opens a menu of the two. One possible: that one as an
+ * icon button. Neither: nothing.
+ */
+function downloadButton(item: LibraryItem): HTMLElement | null {
+	const canZip = item.size <= ZIP_LIMIT;
+	const folderItem: MenuItem = {
+		label: "Download folder",
+		icon: "folder-down",
+		detail: formatBytes(item.size),
+		title: "Download the whole folder as a zip",
+		href: `/api/zip/${encodePath(item.directory)}`,
+		download: `${item.directory.split("/").pop()}.zip`,
+	};
+	if (canZip && item.fetchable) {
+		const button = h(
+			"button",
 			{
-				class: "button disabled",
-				title: `${formatBytes(item.size)} is over the 4 GB zip limit; download the files one by one.`,
-				"aria-disabled": "true",
+				type: "button",
+				class: "button icon-only has-menu",
+				title: "Download…",
+				"aria-label": "Download",
+				"aria-haspopup": "menu",
+				onclick: () =>
+					toggleMenu(button, () => [
+						folderItem,
+						{
+							label: "Download from itch.io",
+							icon: "cloud-download",
+							title: FETCH_TITLE,
+							onSelect: () => startJob(item),
+						},
+					]),
 			},
-			...label,
-			h("small", {}, formatBytes(item.size)),
+			icon("folder-down"),
+			icon("chevron-down"),
+		);
+		return button;
+	}
+	if (canZip) {
+		return h(
+			"a",
+			{
+				class: "button icon-only",
+				href: folderItem.href,
+				download: folderItem.download,
+				title: `Download the whole folder as a zip (${formatBytes(item.size)})`,
+				"aria-label": "Download folder",
+			},
+			icon("folder-down"),
 		);
 	}
+	if (item.fetchable) {
+		return h(
+			"button",
+			{
+				type: "button",
+				class: "button icon-only",
+				title: FETCH_TITLE,
+				"aria-label": "Download from itch.io",
+				onclick: () => startJob(item),
+			},
+			icon("cloud-download"),
+		);
+	}
+	return null;
+}
+
+// Unzipping (admin) --------------------------------------------------------
+
+function isZip(file: LibraryFile): boolean {
+	return file.kind !== "folder" && extension(file.name) === "zip";
+}
+
+/** The zip archives directly inside the item directory. */
+function topLevelZips(item: LibraryItem): LibraryFile[] {
+	return item.files.filter(isZip);
+}
+
+function unzipKey(item: LibraryItem, file: LibraryFile): string {
+	return `${item.directory}/${file.path}`;
+}
+
+/** Archives being extracted (`unzipKey`); their buttons show a spinner. */
+const unzipping = new Set<string>();
+
+/** Bring the unzip buttons of the open inspector in line with `unzipping`. */
+function syncUnzipBusy(item: LibraryItem): void {
+	if (inspectorFor !== item.directory) return;
+	const anyTopLevel = topLevelZips(item).some((f) =>
+		unzipping.has(unzipKey(item, f)),
+	);
+	for (const el of inspector.querySelectorAll<HTMLElement>(
+		"[data-unzip], [data-unzip-all]",
+	)) {
+		const key = el.dataset.unzip;
+		const busy = key !== undefined ? unzipping.has(key) : anyTopLevel;
+		el.classList.toggle("busy", busy);
+		if (el instanceof HTMLButtonElement) el.disabled = busy;
+	}
+}
+
+/**
+ * Extract `files` (zips of `item`) one after the other, next to themselves,
+ * then rescan. Resolves with what was created; failures are toasted.
+ */
+async function unzipFiles(
+	item: LibraryItem,
+	files: LibraryFile[],
+): Promise<string[]> {
+	const todo = files.filter((f) => !unzipping.has(unzipKey(item, f)));
+	if (todo.length === 0) return [];
+	for (const f of todo) unzipping.add(unzipKey(item, f));
+	syncUnzipBusy(item);
+	const created: string[] = [];
+	try {
+		for (const file of todo) {
+			try {
+				created.push((await adminApi.unzip(item.directory, file.path)).created);
+			} catch (err) {
+				adminFailed(err, `Could not unzip ${file.name}`);
+				if (!state.admin) break;
+			}
+		}
+	} finally {
+		for (const f of todo) unzipping.delete(unzipKey(item, f));
+	}
+	if (created.length) {
+		toast(
+			todo.length === 1
+				? `Extracted ${todo[0]?.name} to ${created[0]}.`
+				: `Extracted ${created.length} of ${todo.length} archives.`,
+		);
+	}
+	// The folder changed: rescan, keeping the inspector where it was.
+	treeCache.delete(item.directory);
+	const scrollTop = inspector.scrollTop;
+	await loadLibrary();
+	if (inspectorFor === item.directory) inspector.scrollTop = scrollTop;
+	return created;
+}
+
+/** "Unzip all": every zip at the top level of the item directory. */
+function unzipAllButton(item: LibraryItem, zips: LibraryFile[]): HTMLElement {
+	const busy = zips.some((f) => unzipping.has(unzipKey(item, f)));
 	return h(
-		"a",
+		"button",
 		{
-			class: "button",
-			href: `/api/zip/${item.directory.split("/").map(encodeURIComponent).join("/")}`,
-			download: `${item.directory.split("/").pop()}.zip`,
-			title: "Download the whole folder as a zip",
+			type: "button",
+			class: `button${busy ? " busy" : ""}`,
+			disabled: busy,
+			"data-unzip-all": "",
+			title: `Extract ${zips.length === 1 ? "the zip archive" : `each of the ${zips.length} zip archives`} in the folder next to itself; nothing is overwritten`,
+			onclick: () => unzipFiles(item, zips),
 		},
-		...label,
-		h("small", {}, formatBytes(item.size)),
+		...busyIcon("package-open"),
+		"Unzip all",
+		zips.length > 1 ? h("small", {}, String(zips.length)) : null,
+	);
+}
+
+/**
+ * The icon of a zip row doubles as its unzip button for admins: hovering
+ * shows an opened package, clicking extracts the archive next to itself.
+ */
+function zipIconButton(item: LibraryItem, file: LibraryFile): HTMLElement {
+	const key = unzipKey(item, file);
+	const busy = unzipping.has(key);
+	return h(
+		"button",
+		{
+			type: "button",
+			class: `file-icon-action${busy ? " busy" : ""}`,
+			disabled: busy,
+			"data-unzip": key,
+			title: "Unzip archive here",
+			"aria-label": `Unzip ${file.name}`,
+			onclick: (ev: Event) => {
+				ev.stopPropagation();
+				unzipFiles(item, [file]);
+			},
+			// Enter/Space on the button must not also open the row's viewer.
+			onkeydown: (ev: Event) => ev.stopPropagation(),
+		},
+		...(
+			[
+				[fileIcon(file), "zip-idle"],
+				["package-open", "zip-hover"],
+				["loader-circle", "zip-busy"],
+			] as const
+		).map(([name, cls]) => {
+			const el = icon(name);
+			el.classList.add(cls);
+			return el;
+		}),
 	);
 }
 
@@ -1136,42 +1319,12 @@ function zipButton(item: LibraryItem): HTMLElement {
 /** The job the overlay follows, if any. */
 let job: { id: string; timer: number } | null = null;
 
-function fetchButton(item: LibraryItem): HTMLElement {
-	if (!item.fetchable) {
-		return h(
-			"span",
-			{
-				class: "button disabled",
-				"aria-disabled": "true",
-				title: item.hasManifest
-					? "The manifest has no download page: run the downloader with manifest_include_keys = true to enable this."
-					: "No manifest: the server does not know where to fetch this item from.",
-			},
-			icon("cloud-download"),
-			"Download from itch.io",
-		);
-	}
-	return h(
-		"button",
-		{
-			type: "button",
-			class: "button",
-			title:
-				"Fetch a fresh copy from itch.io with the downloader's settings and get it as a zip",
-			onclick: () => startJob(item),
-		},
-		icon("cloud-download"),
-		"Download from itch.io",
-	);
-}
-
 async function startJob(item: LibraryItem): Promise<void> {
 	if (job) return;
 	try {
-		const res = await fetch(
-			`/api/fetch/${item.directory.split("/").map(encodeURIComponent).join("/")}`,
-			{ method: "POST" },
-		);
+		const res = await fetch(`/api/fetch/${encodePath(item.directory)}`, {
+			method: "POST",
+		});
 		if (!res.ok) throw new Error(await res.text());
 		followJob((await res.json()) as JobStatus);
 	} catch (err) {
@@ -1340,9 +1493,7 @@ async function loadTree(item: LibraryItem): Promise<ItemResponse | null> {
 	const cached = treeCache.get(item.directory);
 	if (cached) return cached;
 	try {
-		const res = await fetch(
-			`/api/item/${item.directory.split("/").map(encodeURIComponent).join("/")}`,
-		);
+		const res = await fetch(`/api/item/${encodePath(item.directory)}`);
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		const tree = (await res.json()) as ItemResponse;
 		treeCache.set(item.directory, tree);
@@ -1469,6 +1620,11 @@ function viewerContext(item: LibraryItem): ViewerContext {
 	return {
 		reveal: isLocal ? (f) => reveal(`${item.directory}/${f.path}`) : null,
 		fileManager: fileManagerName(),
+		unzip: state.admin
+			? async (f) => {
+					if (isZip(f)) await unzipFiles(item, [f]);
+				}
+			: null,
 	};
 }
 
@@ -1603,7 +1759,9 @@ function renderFiles(
 						}
 					}) as EventListener,
 				},
-				icon(fileIcon(file)),
+				state.admin && isZip(file)
+					? zipIconButton(item, file)
+					: icon(fileIcon(file)),
 				h(
 					"span",
 					{ class: "file-name", title: file.path },
@@ -1705,21 +1863,30 @@ function init(): void {
 		renderAdmin();
 		renderAll();
 	});
-	onLongPress(
-		document.querySelector<HTMLElement>(".brand-mark") ?? byId("stats"),
-		() =>
-			openAdminDialog({
-				admin: state.admin,
-				enabled: state.adminEnabled,
-				onSignedIn: () => {
-					toast("Signed in as admin.");
-					setAdmin(true);
-				},
-				onSignedOut: () => {
-					toast("Signed out.");
-					setAdmin(false);
-				},
-			}),
+	const brandMenu = byId<HTMLButtonElement>("brand-menu");
+	const adminDialog = () =>
+		openAdminDialog({
+			admin: state.admin,
+			enabled: state.adminEnabled,
+			onSignedIn: () => {
+				toast("Signed in as admin.");
+				setAdmin(true);
+			},
+			onSignedOut: () => {
+				toast("Signed out.");
+				setAdmin(false);
+			},
+		});
+	brandMenu.addEventListener("click", () =>
+		toggleMenu(brandMenu, () => [
+			state.admin
+				? {
+						label: "Admin session",
+						icon: "shield-check",
+						onSelect: adminDialog,
+					}
+				: { label: "Admin sign-in", icon: "lock", onSelect: adminDialog },
+		]),
 	);
 	const matchCase = byId<HTMLButtonElement>("match-case");
 	const showMatchCase = () =>
