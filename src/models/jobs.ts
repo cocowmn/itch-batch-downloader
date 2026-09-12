@@ -6,9 +6,12 @@ export interface JobStatus {
 	id: string;
 	state: JobState;
 
-	/** The library item the job was started for. */
-	directory: string;
+	/** The library item(s) the job was started for. */
+	directories: string[];
+	/** The item's title, or "n items" for a batch. */
 	title: string;
+	/** Items the pipeline has finished with so far (batches). */
+	completed: number;
 
 	/** Why it failed, or what to show when done. */
 	message: string;

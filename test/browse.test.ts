@@ -20,9 +20,11 @@ import {
 } from "../src/www/server/library.ts";
 import {
 	isLoopback,
+	parseDirectory,
 	redactedManifestBytes,
 	redactItem,
 	resolveFilePath,
+	resolvePath,
 } from "../src/www/server/server.ts";
 
 describe("fuzzy", () => {
@@ -301,6 +303,24 @@ describe("file routes", () => {
 		expect(resolveFilePath(root, "/files/..", true)).toBeNull();
 		expect(resolveFilePath(root, "/files/a//b")).toBeNull();
 		expect(resolveFilePath(root, "/files/a/%ZZ")).toBeNull();
+	});
+
+	test("directories from a request body are checked the same way", () => {
+		expect(parseDirectory("brawlpack")).toEqual(["brawlpack"]);
+		expect(parseDirectory("by author/100% pack")).toEqual([
+			"by author",
+			"100% pack",
+		]);
+		expect(parseDirectory("")).toBeNull();
+		expect(parseDirectory("a//b")).toBeNull();
+		expect(parseDirectory("../cookies.txt")).toBeNull();
+		expect(parseDirectory("a/./b")).toBeNull();
+		expect(parseDirectory("a\0b")).toBeNull();
+		expect(parseDirectory("a", 2)).toBeNull();
+		expect(resolvePath(root, ["by author", "100% pack"])).toBe(
+			join(root, "by author", "100% pack"),
+		);
+		expect(resolvePath(root, ["..", "x"])).toBeNull();
 	});
 });
 

@@ -46,7 +46,7 @@ describe("fetch jobs", () => {
 			);
 
 			const status = async (dir: string) =>
-				jobs.start(dir).then(
+				jobs.start([dir]).then(
 					() => 0,
 					(err: unknown) => (err instanceof JobError ? err.status : -1),
 				);
@@ -55,6 +55,12 @@ describe("fetch jobs", () => {
 			// fetchable, but the server has no cookies to do it with
 			expect(await status("ok")).toBe(400);
 			expect(jobs.currentStatus()).toBeNull();
+			// a selection is refused as a whole when one item cannot be fetched
+			await expect(jobs.start(["ok", "no-keys"])).rejects.toMatchObject({
+				status: 400,
+				message: expect.stringContaining("(no-keys)"),
+			});
+			await expect(jobs.start([])).rejects.toMatchObject({ status: 400 });
 		});
 	});
 
@@ -79,11 +85,12 @@ describe("fetch jobs", () => {
 					downloadPage: "https://127.0.0.1:9/pack/download/KEY",
 				}),
 			);
-			const started = await jobs.start("ok");
+			const started = await jobs.start(["ok"]);
 			expect(started.state).toBe("running");
 			expect(jobs.get(started.id)?.title).toBe("Pack");
-			await expect(jobs.start("ok")).rejects.toBeInstanceOf(JobError);
-			await expect(jobs.start("ok")).rejects.toMatchObject({ status: 409 });
+			expect(started.directories).toEqual(["ok"]);
+			await expect(jobs.start(["ok"])).rejects.toBeInstanceOf(JobError);
+			await expect(jobs.start(["ok"])).rejects.toMatchObject({ status: 409 });
 
 			expect(await jobs.cancel("nope")).toBe(false);
 			expect(await jobs.cancel(started.id)).toBe(true);
@@ -91,9 +98,18 @@ describe("fetch jobs", () => {
 			expect(["cancelled", "failed"]).toContain(after?.state ?? "");
 			expect(after?.finishedAt).not.toBeNull();
 			expect(await jobs.download(started.id)).toBeNull();
-			// the slot is free again
-			const next = await jobs.start("ok");
+			// the slot is free again; a batch is titled by its count
+			await Bun.write(
+				join(root, "two", "two_manifest.json"),
+				manifest({
+					page: "https://127.0.0.1:9/two",
+					downloadPage: "https://127.0.0.1:9/two/download/KEY2",
+				}),
+			);
+			const next = await jobs.start(["ok", "two"], "my picks");
 			expect(next.id).not.toBe(started.id);
+			expect(next.title).toBe("2 items");
+			expect(next.completed).toBe(0);
 			await jobs.shutdown();
 		});
 	});

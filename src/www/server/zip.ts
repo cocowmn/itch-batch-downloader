@@ -125,7 +125,78 @@ export async function zipDirectory(
 	const root = opts.rootName ?? basename(dir);
 	const entries: Entry[] = [];
 	await collect(dir, `${root}/`, opts.exclude ?? defaultExclude, entries);
+	return streamEntries(entries, opts);
+}
 
+/**
+ * Zip several directories into one archive: `<rootName>/<basename(dir)>/...`
+ * for each, in the order given. Two directories with the same base name
+ * (nested `download_name` layouts allow that) get ` (2)`, ` (3)`, … appended.
+ */
+export async function zipDirectories(
+	dirs: string[],
+	opts: ZipOptions & { rootName: string },
+): Promise<ReadableStream<Uint8Array>> {
+	const exclude = opts.exclude ?? defaultExclude;
+	const entries: Entry[] = [];
+	const taken = new Set<string>();
+	for (const dir of dirs) {
+		const base = basename(dir);
+		let name = base;
+		for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${base} (${n})`;
+		taken.add(name.toLowerCase());
+		let s: Awaited<ReturnType<typeof stat>>;
+		try {
+			s = await stat(dir);
+		} catch {
+			continue;
+		}
+		const prefix = `${opts.rootName}/${name}/`;
+		entries.push({
+			name: prefix,
+			path: dir,
+			size: 0,
+			mtime: s.mtime,
+			directory: true,
+		});
+		await collect(dir, prefix, exclude, entries);
+	}
+	return streamEntries(entries, opts);
+}
+
+/** Today as `2026-09-12`, in local time. */
+function today(): string {
+	const d = new Date();
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** The archive name a multi-item download gets unless the user picks one. */
+export function defaultArchiveName(): string {
+	return `${today()}--itch.io-downloads`;
+}
+
+/**
+ * A user-supplied archive name as a file name: path separators and control
+ * characters become dashes, a `.zip` the user typed is dropped (it is added
+ * when the file is served), and an empty result falls back to the default.
+ */
+export function cleanArchiveName(name: string | null | undefined): string {
+	const cleaned = (name ?? "")
+		.replace(/(?:[/\\:]|\p{Cc})+/gu, "-")
+		.trim()
+		.replace(/\.zip$/i, "")
+		.replace(/^[\s.]+|[\s.]+$/g, "")
+		.slice(0, 120)
+		.trim();
+	return cleaned || defaultArchiveName();
+}
+
+/** Write `entries` as a zip into a byte stream; see `zipDirectory`. */
+function streamEntries(
+	entries: Entry[],
+	opts: ZipOptions,
+): ReadableStream<Uint8Array> {
 	// zip.js writes into the writable side; the readable side is the response.
 	// The queue is sized in bytes so a slow client stalls the reads, not RAM.
 	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>(

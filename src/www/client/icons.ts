@@ -26,6 +26,7 @@ import clock from "lucide-static/icons/clock.svg" with { type: "text" };
 import cloudDownload from "lucide-static/icons/cloud-download.svg" with {
 	type: "text",
 };
+import copy from "lucide-static/icons/copy.svg" with { type: "text" };
 import download from "lucide-static/icons/download.svg" with { type: "text" };
 import expand from "lucide-static/icons/expand.svg" with { type: "text" };
 import externalLink from "lucide-static/icons/external-link.svg" with {
@@ -125,6 +126,7 @@ const ICONS: Record<string, string> = {
 	"chevron-right": chevronRight,
 	"chevron-up": chevronUp,
 	clock,
+	copy,
 	download,
 	"external-link": externalLink,
 	file,

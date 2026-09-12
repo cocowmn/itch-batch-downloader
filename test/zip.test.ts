@@ -3,7 +3,13 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unzipSync } from "fflate";
-import { defaultExclude, zipDirectory } from "../src/www/server/zip.ts";
+import {
+	cleanArchiveName,
+	defaultArchiveName,
+	defaultExclude,
+	zipDirectories,
+	zipDirectory,
+} from "../src/www/server/zip.ts";
 
 async function collect(
 	stream: ReadableStream<Uint8Array>,
@@ -91,6 +97,42 @@ describe("zipDirectory", () => {
 		}
 	});
 
+	test("several directories become folders under one root, base names deduplicated", async () => {
+		const root = await mkdtemp(join(tmpdir(), "itch-zip-"));
+		try {
+			await Bun.write(join(root, "one", "a.txt"), "A");
+			await Bun.write(join(root, "nested", "pack", "b.txt"), "B");
+			await Bun.write(join(root, "other", "pack", "c.txt"), "C");
+			await mkdir(join(root, "bare"));
+			const files = unzipSync(
+				await collect(
+					await zipDirectories(
+						[
+							join(root, "one"),
+							join(root, "nested", "pack"),
+							join(root, "other", "pack"),
+							join(root, "bare"),
+							join(root, "missing"),
+						],
+						{ rootName: "picks" },
+					),
+				),
+			);
+			expect(Object.keys(files).sort()).toEqual([
+				"picks/bare/",
+				"picks/one/",
+				"picks/one/a.txt",
+				"picks/pack (2)/",
+				"picks/pack (2)/c.txt",
+				"picks/pack/",
+				"picks/pack/b.txt",
+			]);
+			expect(new TextDecoder().decode(files["picks/pack (2)/c.txt"])).toBe("C");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	test("small archives stay classic 32-bit zips", async () => {
 		const root = await mkdtemp(join(tmpdir(), "itch-zip-"));
 		try {
@@ -160,5 +202,25 @@ describe("zipDirectory", () => {
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("archive names", () => {
+	test("the default carries the date", () => {
+		expect(defaultArchiveName()).toMatch(
+			/^\d{4}-\d{2}-\d{2}--itch\.io-downloads$/,
+		);
+	});
+
+	test("user names are made safe for a file name", () => {
+		expect(cleanArchiveName("my picks")).toBe("my picks");
+		expect(cleanArchiveName("  my picks.zip ")).toBe("my picks");
+		expect(cleanArchiveName("a/b\\c:d")).toBe("a-b-c-d");
+		expect(cleanArchiveName("..hidden..")).toBe("hidden");
+		expect(cleanArchiveName("x".repeat(200))).toHaveLength(120);
+		expect(cleanArchiveName("")).toBe(defaultArchiveName());
+		expect(cleanArchiveName("   ")).toBe(defaultArchiveName());
+		expect(cleanArchiveName(null)).toBe(defaultArchiveName());
+		expect(cleanArchiveName(".zip")).toBe(defaultArchiveName());
 	});
 });

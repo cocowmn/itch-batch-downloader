@@ -574,6 +574,72 @@ kbd {
 	font-weight: 500;
 }
 
+/* Multi-selection: a tick badge on every card, row and thumbnail that only
+   shows in selection mode (empty ring) or when the item is selected. */
+.check {
+	position: absolute;
+	z-index: 1;
+	display: none;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	border-radius: 50%;
+	border: 2px solid rgba(255, 255, 255, 0.75);
+	background: rgba(14, 15, 19, 0.55);
+	backdrop-filter: blur(6px);
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+	color: #fff;
+	pointer-events: none;
+}
+
+.check .icon {
+	width: 14px;
+	height: 14px;
+	stroke-width: 3;
+	opacity: 0;
+}
+
+.selecting .check,
+[data-checked="true"] .check {
+	display: flex;
+}
+
+[data-checked="true"] .check {
+	border-color: var(--accent);
+	background: var(--accent);
+}
+
+[data-checked="true"] .check .icon {
+	opacity: 1;
+}
+
+/* A long press must not select text or open the callout on a phone. */
+[data-directory] {
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-touch-callout: none;
+}
+
+.card {
+	position: relative;
+}
+
+.card .check {
+	top: 16px;
+	right: 16px;
+}
+
+.card[data-checked="true"] {
+	border-color: var(--accent-line);
+	background: var(--accent-soft);
+}
+
+/* The bar at the bottom must not cover the last row. */
+.results-inner.selecting {
+	padding-bottom: 88px;
+}
+
 /* List view */
 .table {
 	width: 100%;
@@ -631,7 +697,18 @@ kbd {
 }
 
 .table .thumb {
+	position: relative;
 	width: 56px;
+}
+
+.table .thumb .check {
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+}
+
+.table tr[data-checked="true"] td {
+	background: var(--accent-soft);
 }
 
 .table .thumb .cover {
@@ -838,6 +915,21 @@ kbd {
 
 .filmstrip .cover {
 	border-radius: 6px;
+}
+
+.filmstrip button {
+	position: relative;
+}
+
+.filmstrip button .check {
+	top: 6px;
+	right: 6px;
+	width: 20px;
+	height: 20px;
+}
+
+.filmstrip button[data-checked="true"] {
+	opacity: 1;
 }
 
 /* Inspector */
@@ -1559,6 +1651,127 @@ kbd {
 	from {
 		opacity: 0;
 		transform: translate(-50%, 6px);
+	}
+}
+
+/* Toasts move up while the selection bar has the bottom edge. */
+body.has-selection .toast {
+	bottom: 84px;
+}
+
+/* Selection bar: like a toast, but it stays until the selection is cleared.
+   [clear] [n items selected] [size] ........ [Copy] [Download] [Delete] */
+.selection-bar {
+	position: fixed;
+	left: 50%;
+	bottom: 20px;
+	transform: translateX(-50%);
+	z-index: 5;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: max-content;
+	max-width: calc(100vw - 24px);
+	min-height: 52px;
+	padding: 8px 10px 8px 8px;
+	border-radius: 16px;
+	border: 1px solid var(--line-strong);
+	background: var(--bg-panel);
+	box-shadow: var(--shadow);
+	animation: fade 0.2s ease-out;
+}
+
+.selection-bar[hidden] {
+	display: none;
+}
+
+/* Centred over the results, not the window, while the inspector is docked
+   beside them (the gallery keeps it open in selection mode). */
+@media (min-width: 901px) {
+	body:has(.workspace.has-inspector) .selection-bar {
+		left: calc(50% - var(--inspector-w) / 2);
+		max-width: calc(100vw - var(--inspector-w) - 24px);
+	}
+}
+
+.selection-clear {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	width: 32px;
+	height: 32px;
+	border-radius: 50%;
+	color: var(--text-soft);
+	transition: background 0.15s;
+}
+
+.selection-clear:hover {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+.selection-clear .icon {
+	width: 16px;
+	height: 16px;
+}
+
+.selection-info {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	flex: 1 1 auto;
+	min-width: 0;
+	padding-right: 8px;
+	white-space: nowrap;
+	font-size: 13px;
+}
+
+.selection-info strong {
+	font-weight: 600;
+}
+
+.selection-size {
+	font-family: var(--mono);
+	font-size: 12px;
+	color: var(--muted);
+}
+
+.selection-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: none;
+}
+
+.selection-actions .button.has-menu .icon-chevron-down {
+	width: 13px;
+	height: 13px;
+	margin-right: -3px;
+	margin-left: -2px;
+	color: var(--muted);
+	transition: transform 0.15s;
+}
+
+@media (max-width: 640px) {
+	.selection-bar {
+		gap: 6px;
+	}
+
+	.selection-info {
+		flex-direction: column;
+		gap: 0;
+		padding-right: 4px;
+	}
+
+	/* Icons only: the labels live in the tooltips. */
+	.selection-actions .button .label {
+		display: none;
+	}
+
+	.selection-actions .button {
+		gap: 2px;
+		padding: 0 8px;
 	}
 }
 
@@ -2370,6 +2583,45 @@ body.viewer-open {
 	opacity: 0.6;
 }
 
+/* An input with a fixed suffix after it (the ".zip" of an archive name) */
+.dialog-field {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.dialog-field .dialog-input {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.dialog-suffix {
+	flex: none;
+	font-family: var(--mono);
+	font-size: 13px;
+	color: var(--muted);
+}
+
+.dialog-textarea {
+	width: 100%;
+	height: 220px;
+	padding: 10px 12px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+	color: var(--text);
+	font-family: var(--mono);
+	font-size: 12px;
+	line-height: 1.5;
+	resize: vertical;
+	outline: none;
+}
+
+.dialog-textarea:focus {
+	border-color: var(--accent-line);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .dialog-error {
 	margin: 0;
 	min-height: 1.4em;
@@ -2603,7 +2855,8 @@ body.viewer-open {
 		transition: none;
 	}
 
-	.popover {
+	.popover,
+	.selection-bar {
 		animation: none;
 	}
 }

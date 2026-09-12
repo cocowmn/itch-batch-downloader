@@ -1,7 +1,7 @@
-// "Download from itch.io" jobs of the download browser: fetch one item again
-// with the CLI pipeline into a temporary directory, then hand it out as a
-// zip. One job at a time; the temp directory is removed after the download,
-// on cancel, on expiry and on exit.
+// "Download from itch.io" jobs of the download browser: fetch one item (or a
+// selection of items) again with the CLI pipeline into a temporary
+// directory, then hand it out as a zip. One job at a time; the temp
+// directory is removed after the download, on cancel, on expiry and on exit.
 
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,7 +19,7 @@ import type { Bundle, Product } from "../../models/product.ts";
 import { isAbortError } from "../../utils/abort.ts";
 import { log } from "../../utils/log.ts";
 import { readManifest } from "./library.ts";
-import { zipDirectory, zipSize } from "./zip.ts";
+import { cleanArchiveName, zipDirectory, zipSize } from "./zip.ts";
 
 /** Thrown by `start()`; `status` is the HTTP status to answer with. */
 export class JobError extends Error {
@@ -34,8 +34,13 @@ export class JobError extends Error {
 interface Job {
 	status: JobStatus;
 	tmp: string;
-	/** `<tmp>/<slug>`, set once the pipeline created it. */
-	itemDir: string | null;
+	/** `<tmp>/<slug>` of each item the pipeline finished. */
+	itemDirs: string[];
+	/**
+	 * A batch: the zip holds a folder per item under this name. A single
+	 * item is zipped as its own folder instead.
+	 */
+	archiveName: string | null;
 	controller: AbortController;
 	/** Settles when the pipeline is finished, whatever the outcome. */
 	finished: Promise<void>;
@@ -64,34 +69,22 @@ export class FetchJobs {
 	}
 
 	/**
-	 * Fetch the item in `directory` (relative to the root) again. Throws a
-	 * `JobError` when another job is running, the item cannot be fetched or
-	 * the cookie file is missing.
+	 * Fetch the items in `directories` (relative to the root) again; with
+	 * more than one, the zip is named `archiveName` and holds a folder per
+	 * item. Throws a `JobError` when another job is running, an item cannot
+	 * be fetched or the cookie file is missing.
 	 */
-	async start(directory: string): Promise<JobStatus> {
+	async start(
+		directories: string[],
+		archiveName?: string | null,
+	): Promise<JobStatus> {
 		if (this.current?.status.state === "running")
 			throw new JobError("Another download is already running.", 409);
-		const prefix = basename(directory);
-		const manifest = await readManifest(
-			join(this.root, ...directory.split("/"), `${prefix}${MANIFEST_SUFFIX}`),
-		);
-		if (!manifest)
-			throw new JobError("This item has no manifest to fetch it from.", 400);
-		const dlurl = manifest.urls?.downloadPage;
-		if (!dlurl)
-			throw new JobError(
-				"The manifest has no download page: run the downloader with manifest_include_keys = true.",
-				400,
-			);
-		const product = productFromDownloadUrl(manifest.title, dlurl, {
-			productUrl: manifest.urls.page,
-			authorName: manifest.author?.name,
-		});
-		if (!product)
-			throw new JobError("The manifest's download page URL is unusable.", 400);
-		product.bundles = manifest.bundles
-			.filter((b): b is Bundle => Boolean(b.key && b.url))
-			.map((b) => ({ name: b.name, key: b.key, url: b.url }));
+		if (directories.length === 0)
+			throw new JobError("Nothing to download.", 400);
+		const products: Product[] = [];
+		for (const directory of directories)
+			products.push(await this.product(directory, directories.length > 1));
 		if (!(await Bun.file(this.config.cookie_file).exists()))
 			throw new JobError(
 				`Cookie file ${this.config.cookie_file} not found; the server needs your itch.io session to download.`,
@@ -103,11 +96,13 @@ export class FetchJobs {
 
 		const tmp = await mkdtemp(join(tmpdir(), "itch-fetch-"));
 		const controller = new AbortController();
+		const batch = products.length > 1;
 		const status: JobStatus = {
 			id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
 			state: "running",
-			directory,
-			title: manifest.title,
+			directories,
+			title: batch ? `${products.length} items` : (products[0]?.title ?? ""),
+			completed: 0,
 			message: "",
 			log: [],
 			startedAt: new Date().toISOString(),
@@ -117,19 +112,53 @@ export class FetchJobs {
 		const job: Job = {
 			status,
 			tmp,
-			itemDir: null,
+			itemDirs: [],
+			archiveName: batch ? cleanArchiveName(archiveName) : null,
 			controller,
 			finished: Promise.resolve(),
 			expiry: null,
 		};
 		this.current = job;
-		job.finished = this.runJob(job, product).catch((err) => {
+		job.finished = this.runJob(job, products).catch((err) => {
 			log.error("Download job crashed", err);
 		});
 		return status;
 	}
 
-	private async runJob(job: Job, product: Product): Promise<void> {
+	/** The product an item's manifest describes, or why it cannot be fetched. */
+	private async product(directory: string, named: boolean): Promise<Product> {
+		const prefix = basename(directory);
+		const which = named ? ` (${directory})` : "";
+		const manifest = await readManifest(
+			join(this.root, ...directory.split("/"), `${prefix}${MANIFEST_SUFFIX}`),
+		);
+		if (!manifest)
+			throw new JobError(
+				`This item has no manifest to fetch it from${which}.`,
+				400,
+			);
+		const dlurl = manifest.urls?.downloadPage;
+		if (!dlurl)
+			throw new JobError(
+				`The manifest has no download page${which}: run the downloader with manifest_include_keys = true.`,
+				400,
+			);
+		const product = productFromDownloadUrl(manifest.title, dlurl, {
+			productUrl: manifest.urls.page,
+			authorName: manifest.author?.name,
+		});
+		if (!product)
+			throw new JobError(
+				`The manifest's download page URL is unusable${which}.`,
+				400,
+			);
+		product.bundles = manifest.bundles
+			.filter((b): b is Bundle => Boolean(b.key && b.url))
+			.map((b) => ({ name: b.name, key: b.key, url: b.url }));
+		return product;
+	}
+
+	private async runJob(job: Job, products: Product[]): Promise<void> {
 		const { status, controller } = job;
 		const untap = log.tap((line) => {
 			status.log.push(line);
@@ -142,12 +171,14 @@ export class FetchJobs {
 			manifest_include_keys: false,
 			log_download_progress: false,
 		};
+		const what =
+			products.length === 1
+				? `'${products[0]?.slug}'`
+				: `${products.length} items`;
 		let capturer: PageCapturer | null = null;
 		try {
 			log.raw();
-			log.info(
-				`Download job for '${product.slug}' started by the download browser`,
-			);
+			log.info(`Download job for ${what} started by the download browser`);
 			const client = await createClient(config, controller.signal);
 			capturer = new PageCapturer(client.jar, {
 				png: config.create_png,
@@ -157,25 +188,49 @@ export class FetchJobs {
 			const videos = config.download_videos
 				? new VideoDownloader(config.yt_dlp_path)
 				: null;
-			const relative = await processItem({
-				client,
-				config,
-				product,
-				index: 1,
-				total: 1,
-				runStarted: new Date(),
-				name: parseDownloadName(config.download_name),
-				capturer,
-				videos,
-				downloadDir: job.tmp,
-				signal: controller.signal,
-			});
-			if (!relative) throw new Error("The item was skipped by the pipeline.");
-			job.itemDir = join(job.tmp, relative);
-			status.size = await zipSize(job.itemDir);
+			const runStarted = new Date();
+			const name = parseDownloadName(config.download_name);
+			const failed: string[] = [];
+			for (const [i, product] of products.entries()) {
+				if (products.length > 1) {
+					log.raw();
+					log.info(
+						`Analysing item ${i + 1} of ${products.length}. Title: ${product.slug}`,
+					);
+				}
+				try {
+					const relative = await processItem({
+						client,
+						config,
+						product,
+						index: i + 1,
+						total: products.length,
+						runStarted,
+						name,
+						capturer,
+						videos,
+						downloadDir: job.tmp,
+						signal: controller.signal,
+					});
+					if (!relative)
+						throw new Error("The item was skipped by the pipeline.");
+					job.itemDirs.push(join(job.tmp, relative));
+				} catch (err) {
+					// One item failing does not sink a batch; a single item does.
+					if (isAbortError(err) || products.length === 1) throw err;
+					log.error(`Could not fetch '${product.slug}'`, err);
+					failed.push(product.title);
+				}
+				status.completed = i + 1;
+			}
+			if (job.itemDirs.length === 0)
+				throw new Error("None of the items could be fetched.");
+			status.size = await zipSize(job.tmp);
 			status.state = "done";
-			status.message = "Ready to download.";
-			log.info(`Download job for '${product.slug}' finished`);
+			status.message = failed.length
+				? `Ready to download; ${failed.length} of ${products.length} items could not be fetched: ${failed.join(", ")}.`
+				: "Ready to download.";
+			log.info(`Download job for ${what} finished`);
 			job.expiry = setTimeout(() => {
 				this.cleanup(job).catch(() => {});
 			}, EXPIRY_MS);
@@ -183,11 +238,11 @@ export class FetchJobs {
 			if (isAbortError(err) || controller.signal.aborted) {
 				status.state = "cancelled";
 				status.message = "Cancelled.";
-				log.info(`Download job for '${product.slug}' cancelled`);
+				log.info(`Download job for ${what} cancelled`);
 			} else {
 				status.state = "failed";
 				status.message = err instanceof Error ? err.message : String(err);
-				log.error(`Download job for '${product.slug}' failed`, err);
+				log.error(`Download job for ${what} failed`, err);
 			}
 			await rm(job.tmp, { recursive: true, force: true }).catch(() => {});
 		} finally {
@@ -220,8 +275,15 @@ export class FetchJobs {
 		const job = this.current;
 		if (!job || job.status.id !== id || job.status.state !== "done")
 			return null;
-		if (!job.itemDir) return null;
-		const reader = (await zipDirectory(job.itemDir)).getReader();
+		const [itemDir] = job.itemDirs;
+		if (!itemDir) return null;
+		// A batch zips the whole temp directory: one folder per item.
+		const name = job.archiveName ?? basename(itemDir);
+		const reader = (
+			await (job.archiveName
+				? zipDirectory(job.tmp, { rootName: job.archiveName })
+				: zipDirectory(itemDir))
+		).getReader();
 		let finished = false;
 		const finish = () => {
 			if (finished) return;
@@ -244,7 +306,7 @@ export class FetchJobs {
 				finish();
 			},
 		});
-		return { stream, name: `${basename(job.itemDir)}.zip` };
+		return { stream, name: `${name}.zip` };
 	}
 
 	private async cleanup(job: Job): Promise<void> {

@@ -11,7 +11,7 @@ import type {
 	LibraryResponse,
 } from "../../models/library.ts";
 import { AdminError, adminApi, openAdminDialog } from "./admin.ts";
-import { confirmDialog } from "./dialog.ts";
+import { confirmDialog, copyFallbackDialog, promptDialog } from "./dialog.ts";
 import { byId, formatBytes, formatDate, formatDay, h } from "./dom.ts";
 import { matchQuery, type SearchField } from "./fuzzy.ts";
 import { busyIcon, fileIcon, hydrateIcons, icon, iconSvg } from "./icons.ts";
@@ -30,6 +30,12 @@ interface State {
 	/** 1 ascending, -1 descending. */
 	dir: 1 | -1;
 	selected: string | null;
+	/**
+	 * The multi-selection (directories), in the order the items were picked.
+	 * Non-empty means selection mode: clicks toggle items instead of opening
+	 * them, and the bar at the bottom offers actions on the whole set.
+	 */
+	checked: Set<string>;
 	/** Filter matches case; off by default. */
 	caseSensitive: boolean;
 	/** Gallery view on narrow screens: the inspector only opens on request. */
@@ -58,6 +64,7 @@ const state: State = {
 	sort: "title",
 	dir: 1,
 	selected: null,
+	checked: new Set(),
 	caseSensitive: false,
 	detailsOpen: false,
 	adminEnabled: false,
@@ -171,6 +178,10 @@ async function loadLibrary(): Promise<void> {
 		) {
 			state.selected = null;
 		}
+		// Items that went away (deleted, hidden by another admin) leave the selection.
+		const present = new Set(state.library.items.map((i) => i.directory));
+		for (const dir of state.checked)
+			if (!present.has(dir)) state.checked.delete(dir);
 		renderAll();
 	} catch (err) {
 		toast(`Could not load the library: ${String(err)}`);
@@ -248,6 +259,7 @@ function renderAll(): void {
 	renderStats();
 	renderResults();
 	renderInspector(true);
+	renderSelectionBar();
 	syncHash();
 }
 
@@ -269,7 +281,7 @@ function renderStats(): void {
 
 function renderResults(): void {
 	results.replaceChildren();
-	results.className = `results-inner view-${state.view} hidden-scrollbar`;
+	results.className = `results-inner view-${state.view} hidden-scrollbar${selecting() ? " selecting" : ""}`;
 	if (!state.library) return;
 	if (visible.length === 0) {
 		results.append(renderEmpty());
@@ -375,6 +387,147 @@ function moveSelection(delta: number): void {
 		?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
+// Multi-selection ---------------------------------------------------------
+
+/** Selection mode is on while anything is selected. */
+function selecting(): boolean {
+	return state.checked.size > 0;
+}
+
+/**
+ * A tap on a card, row or filmstrip thumbnail: opens the item, unless the
+ * multi-selection is in play (or Shift is held to start it), in which case
+ * it toggles the item's membership.
+ */
+function activate(item: LibraryItem, ev: MouseEvent, openDetails = true): void {
+	if (ev.shiftKey || selecting()) {
+		ev.preventDefault();
+		toggleChecked(item.directory);
+		return;
+	}
+	select(item.directory, openDetails);
+}
+
+/** The tick badge on a card, row or thumbnail; CSS shows it in selection mode. */
+function checkMark(): HTMLElement {
+	return h("span", { class: "check", "aria-hidden": "true" }, icon("check"));
+}
+
+function toggleChecked(directory: string): void {
+	setChecked(directory, !state.checked.has(directory));
+}
+
+function setChecked(directory: string, checked: boolean): void {
+	const wasSelecting = selecting();
+	if (checked) state.checked.add(directory);
+	else state.checked.delete(directory);
+	if (!wasSelecting && selecting()) enterSelection();
+	for (const el of results.querySelectorAll<HTMLElement>(
+		`[data-directory="${CSS.escape(directory)}"]`,
+	)) {
+		el.setAttribute("data-checked", String(checked));
+	}
+	syncSelection();
+}
+
+/** Every item the filter lets through joins the selection (⌘A). */
+function checkAll(): void {
+	if (visible.length === 0) return;
+	const wasSelecting = selecting();
+	for (const item of visible) state.checked.add(item.directory);
+	if (!wasSelecting) enterSelection();
+	for (const el of results.querySelectorAll<HTMLElement>("[data-directory]"))
+		el.setAttribute(
+			"data-checked",
+			String(state.checked.has(el.dataset.directory ?? "")),
+		);
+	syncSelection();
+}
+
+function clearChecked(): void {
+	if (!selecting()) return;
+	state.checked.clear();
+	for (const el of results.querySelectorAll<HTMLElement>("[data-directory]"))
+		el.setAttribute("data-checked", "false");
+	syncSelection();
+}
+
+/** Selection mode starts: the inspector is in the way of picking items. */
+function enterSelection(): void {
+	if (state.view !== "gallery" && state.selected) closeDetails();
+}
+
+/** After the selection changed: the mode class and the bar. */
+function syncSelection(): void {
+	results.classList.toggle("selecting", selecting());
+	renderSelectionBar();
+}
+
+/** The selected items in library order (the set keeps pick order). */
+function checkedItems(): LibraryItem[] {
+	return (state.library?.items ?? []).filter((i) =>
+		state.checked.has(i.directory),
+	);
+}
+
+const LONG_PRESS_MS = 500;
+
+/**
+ * A long press on a card, row or thumbnail selects it (the touch way into
+ * selection mode). Delegated from the results container so the views can
+ * rebuild their elements freely; the click that ends the press is swallowed,
+ * and so is the context menu a phone opens on a long press.
+ */
+function wireLongPress(): void {
+	let timer = 0;
+	let origin: { x: number; y: number } | null = null;
+	/** The element a press just fired on; its click is not an activation. */
+	let fired: HTMLElement | null = null;
+	const cancel = () => {
+		clearTimeout(timer);
+		timer = 0;
+		origin = null;
+	};
+	const target = (ev: Event) =>
+		ev.target instanceof Element
+			? ev.target.closest<HTMLElement>("[data-directory]")
+			: null;
+	results.addEventListener("pointerdown", (ev) => {
+		fired = null;
+		cancel();
+		const el = target(ev);
+		if (!el || ev.button !== 0) return;
+		origin = { x: ev.clientX, y: ev.clientY };
+		timer = window.setTimeout(() => {
+			timer = 0;
+			fired = el;
+			const directory = el.dataset.directory;
+			if (directory && !state.checked.has(directory))
+				setChecked(directory, true);
+		}, LONG_PRESS_MS);
+	});
+	results.addEventListener("pointermove", (ev) => {
+		if (origin && Math.hypot(ev.clientX - origin.x, ev.clientY - origin.y) > 8)
+			cancel();
+	});
+	for (const type of ["pointerup", "pointercancel"] as const)
+		results.addEventListener(type, cancel);
+	results.addEventListener(
+		"click",
+		(ev) => {
+			if (fired && fired === target(ev)) {
+				ev.stopPropagation();
+				ev.preventDefault();
+			}
+			fired = null;
+		},
+		true,
+	);
+	results.addEventListener("contextmenu", (ev) => {
+		if ((timer || fired) && target(ev)) ev.preventDefault();
+	});
+}
+
 // Grid --------------------------------------------------------------------
 
 function renderGrid(): HTMLElement {
@@ -387,9 +540,11 @@ function renderGrid(): HTMLElement {
 				class: `card${item.hidden ? " is-hidden" : ""}`,
 				"data-directory": item.directory,
 				"aria-selected": String(item.directory === state.selected),
-				onclick: () => select(item.directory),
+				"data-checked": String(state.checked.has(item.directory)),
+				onclick: (ev: Event) => activate(item, ev as MouseEvent),
 			},
 			coverElement(item),
+			checkMark(),
 			h(
 				"div",
 				{ class: "card-body" },
@@ -468,9 +623,10 @@ function renderList(): HTMLElement {
 					class: item.hidden ? "is-hidden" : "",
 					"data-directory": item.directory,
 					"aria-selected": String(item.directory === state.selected),
-					onclick: () => select(item.directory),
+					"data-checked": String(state.checked.has(item.directory)),
+					onclick: (ev: Event) => activate(item, ev as MouseEvent),
 				},
-				h("td", { class: "thumb" }, thumb),
+				h("td", { class: "thumb" }, thumb, checkMark()),
 				h(
 					"td",
 					{},
@@ -519,10 +675,12 @@ function renderGallery(): HTMLElement {
 					class: item.hidden ? "is-hidden" : "",
 					"data-directory": item.directory,
 					"aria-selected": String(item.directory === state.selected),
+					"data-checked": String(state.checked.has(item.directory)),
 					title: item.hidden ? `${item.title} (hidden)` : item.title,
-					onclick: () => select(item.directory, false),
+					onclick: (ev: Event) => activate(item, ev as MouseEvent, false),
 				},
 				coverElement(item),
+				checkMark(),
 			),
 		);
 	}
@@ -884,6 +1042,7 @@ const showHiddenButton = byId<HTMLButtonElement>("show-hidden");
 
 /** Show or hide the admin controls for the current sign-in state. */
 function renderAdmin(): void {
+	renderSelectionBar();
 	showHiddenButton.hidden = !state.admin;
 	showHiddenButton.setAttribute("aria-pressed", String(state.showHidden));
 	showHiddenButton.title = state.showHidden
@@ -1352,14 +1511,21 @@ function followJob(status: JobStatus): void {
 		const last = st.log.at(-1) ?? "";
 		line.textContent = last.replace(/^\S+ \S+ \[\w+\] /, "");
 		const secs = Math.max(0, Math.floor((Date.now() - started) / 1000));
-		elapsed.textContent = `· ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+		const total = st.directories.length;
+		elapsed.textContent =
+			(total > 1
+				? `· item ${Math.min(st.completed + 1, total)} of ${total} `
+				: "") +
+			`· ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
 		if (st.state === "running") return false;
 		clearInterval(job?.timer);
 		job = null;
 		if (st.state === "done") {
 			overlay.remove();
 			toast(
-				`${st.title} is ready${st.size ? ` (${formatBytes(st.size)})` : ""}; downloading.`,
+				st.message.startsWith("Ready to download;")
+					? st.message
+					: `${st.title} is ready${st.size ? ` (${formatBytes(st.size)})` : ""}; downloading.`,
 			);
 			location.assign(`/api/fetch/job/${encodeURIComponent(st.id)}/download`);
 		} else if (st.state === "cancelled") {
@@ -1775,6 +1941,289 @@ function renderFiles(
 }
 
 // ---------------------------------------------------------------------------
+// Selection bar: what is selected, and what can be done with all of it
+
+const selectionBar = byId<HTMLElement>("selection");
+
+function renderSelectionBar(): void {
+	const items = checkedItems();
+	const show = items.length > 0;
+	selectionBar.hidden = !show;
+	document.body.classList.toggle("has-selection", show);
+	if (!show) {
+		selectionBar.replaceChildren();
+		return;
+	}
+	const size = items.reduce((acc, i) => acc + i.size, 0);
+	selectionBar.replaceChildren(
+		h(
+			"button",
+			{
+				type: "button",
+				class: "selection-clear",
+				title: "Clear the selection (Esc)",
+				"aria-label": "Clear the selection",
+				onclick: () => clearChecked(),
+			},
+			icon("x"),
+		),
+		h(
+			"span",
+			{ class: "selection-info" },
+			h(
+				"strong",
+				{},
+				`${items.length} item${items.length === 1 ? "" : "s"} selected`,
+			),
+			h("span", { class: "selection-size" }, formatBytes(size)),
+		),
+		h(
+			"div",
+			{ class: "selection-actions" },
+			h(
+				"button",
+				{
+					type: "button",
+					class: "button",
+					title: "Copy the details of the selected items as JSON",
+					onclick: () => copySelection(items),
+				},
+				icon("copy"),
+				h("span", { class: "label" }, "Copy details"),
+			),
+			selectionDownloadButton(items),
+			state.admin
+				? h(
+						"button",
+						{
+							type: "button",
+							class: "button danger",
+							title: "Delete the selected items from disk",
+							onclick: () => deleteItems(items),
+						},
+						icon("trash-2"),
+						h("span", { class: "label" }, "Delete"),
+					)
+				: null,
+		),
+	);
+}
+
+/**
+ * The selection's download button, with the same rules as the item's: a
+ * menu of both ways when every item can be fetched from itch.io again,
+ * the folder download alone otherwise.
+ */
+function selectionDownloadButton(items: LibraryItem[]): HTMLElement {
+	const size = formatBytes(items.reduce((acc, i) => acc + i.size, 0));
+	const fetchable = items.every((i) => i.fetchable);
+	const button = h(
+		"button",
+		{
+			type: "button",
+			class: `button primary${fetchable ? " has-menu" : ""}`,
+			title: fetchable
+				? "Download…"
+				: `Download the selected folders as one zip (${size})`,
+			"aria-haspopup": fetchable ? "menu" : undefined,
+			onclick: () => {
+				if (!fetchable) {
+					downloadSelection(items);
+					return;
+				}
+				toggleMenu(
+					button,
+					() => [
+						{
+							label:
+								items.length === 1 ? "Download folder" : "Download folders",
+							icon: "folder-down",
+							detail: size,
+							title: "Download the selected folders as one zip",
+							onSelect: () => downloadSelection(items),
+						},
+						{
+							label: "Download from itch.io",
+							icon: "cloud-download",
+							title: FETCH_TITLE,
+							onSelect: () => fetchSelection(items),
+						},
+					],
+					{ side: "top", align: "end" },
+				);
+			},
+		},
+		icon("folder-down"),
+		h("span", { class: "label" }, "Download"),
+		fetchable ? icon("chevron-down") : null,
+	);
+	return button;
+}
+
+/** Today as `2026-09-12`, local time, for the default archive name. */
+function today(): string {
+	const d = new Date();
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Let the user name the archive; null when they change their mind. */
+function askArchiveName(items: LibraryItem[]): Promise<string | null> {
+	return promptDialog({
+		title: "Name the archive",
+		icon: icon("folder-down"),
+		message: [
+			`The zip holds a folder for each of the ${items.length} selected item${items.length === 1 ? "" : "s"}.`,
+		],
+		value: `${today()}--itch.io-downloads`,
+		suffix: ".zip",
+		confirmLabel: "Download",
+	});
+}
+
+/**
+ * "Download folders": the selected directories as one zip. The browser
+ * saves the answer of a form post like any download, and the list of
+ * directories travels in the body rather than a URL of unbounded length.
+ */
+async function downloadSelection(items: LibraryItem[]): Promise<void> {
+	const name = await askArchiveName(items);
+	if (name === null) return;
+	const form = h("form", { method: "post", action: "/api/zip", hidden: true });
+	form.append(h("input", { type: "hidden", name: "name", value: name }));
+	for (const item of items)
+		form.append(
+			h("input", { type: "hidden", name: "directory", value: item.directory }),
+		);
+	document.body.append(form);
+	form.submit();
+	form.remove();
+}
+
+/** "Download from itch.io" for the selection: one job, one zip. */
+async function fetchSelection(items: LibraryItem[]): Promise<void> {
+	if (job) return;
+	const name = await askArchiveName(items);
+	if (name === null) return;
+	try {
+		const res = await fetch("/api/fetch", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				directories: items.map((i) => i.directory),
+				name,
+			}),
+		});
+		if (!res.ok) throw new Error(await res.text());
+		followJob((await res.json()) as JobStatus);
+	} catch (err) {
+		toast(
+			`Could not start the download: ${String(err).replace(/^Error: /, "")}`,
+		);
+	}
+}
+
+/**
+ * What "Copy details" puts on the clipboard for one item: its manifest as
+ * the server serves it (without keys), or, for an item without one, what
+ * the library knows about it in the manifest's shape.
+ */
+async function itemDetails(item: LibraryItem): Promise<unknown> {
+	const manifest = item.files.find((f) => f.role === "manifest");
+	if (manifest?.url) {
+		try {
+			const res = await fetch(manifest.url);
+			if (res.ok) return await res.json();
+		} catch {
+			// fall through to the library's view of the item
+		}
+	}
+	return {
+		title: item.title,
+		author: item.author,
+		urls: item.urls,
+		itchId: item.itchId,
+		description: item.description,
+		info: item.info,
+		tags: item.tags,
+		bundles: item.bundles,
+		directory: item.directory,
+		size: item.size,
+		modified: item.modified,
+		files: item.files.filter((f) => f.role === "download").map((f) => f.name),
+	};
+}
+
+async function copySelection(items: LibraryItem[]): Promise<void> {
+	const build = async () =>
+		JSON.stringify(await Promise.all(items.map(itemDetails)), null, 2);
+	const what = `${items.length} item${items.length === 1 ? "" : "s"}`;
+	try {
+		// A promise-valued ClipboardItem keeps the user gesture while the
+		// manifests are fetched; without the API, writeText is the next try.
+		if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+			const text = build().then((t) => new Blob([t], { type: "text/plain" }));
+			await navigator.clipboard.write([
+				new ClipboardItem({ "text/plain": text }),
+			]);
+		} else if (navigator.clipboard?.writeText) {
+			await navigator.clipboard.writeText(await build());
+		} else {
+			throw new Error("no clipboard");
+		}
+		toast(`Copied the details of ${what}.`);
+	} catch {
+		// No clipboard on a plain-http page (or the write was refused): the
+		// text is shown instead, with a copy button that still works there.
+		copyFallbackDialog(`Details of ${what}`, await build());
+	}
+}
+
+async function deleteItems(items: LibraryItem[]): Promise<void> {
+	const size = items.reduce((acc, i) => acc + i.size, 0);
+	const what = `${items.length} item${items.length === 1 ? "" : "s"}`;
+	const ok = await confirmDialog({
+		title: `Delete ${what}?`,
+		icon: icon("triangle-alert"),
+		message: [
+			`This removes the ${items.length === 1 ? "folder" : "folders"} of `,
+			h("strong", {}, items.map((i) => i.title).join(", ")),
+			` (${formatBytes(size)}) and everything in them from disk. It cannot be undone.`,
+		],
+		confirmLabel: `Delete ${what}`,
+		danger: true,
+	});
+	if (!ok) return;
+	const lib = state.library;
+	let deleted = 0;
+	for (const item of items) {
+		try {
+			await adminApi.deleteItem(item.directory);
+		} catch (err) {
+			adminFailed(err, `Could not delete ${item.title}`);
+			if (!state.admin) break;
+			continue;
+		}
+		deleted++;
+		if (lib)
+			lib.items = lib.items.filter((i) => i.directory !== item.directory);
+		treeCache.delete(item.directory);
+		state.checked.delete(item.directory);
+		if (state.selected === item.directory) {
+			state.selected = null;
+			state.detailsOpen = false;
+		}
+	}
+	if (deleted)
+		toast(
+			deleted === items.length
+				? `Deleted ${what}.`
+				: `Deleted ${deleted} of ${items.length} items.`,
+		);
+	renderAll();
+}
+
+// ---------------------------------------------------------------------------
 // Toasts
 
 let toastTimer = 0;
@@ -1898,6 +2347,8 @@ function init(): void {
 				setQuery("");
 			} else if (typing) {
 				searchInput.blur();
+			} else if (selecting()) {
+				clearChecked();
 			} else if (inspectorWanted()) {
 				closeDetails();
 			}
@@ -1911,6 +2362,9 @@ function init(): void {
 			ev.preventDefault();
 			searchInput.focus();
 			searchInput.select();
+		} else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "a") {
+			ev.preventDefault();
+			checkAll();
 		} else if (ev.key === "ArrowRight" || ev.key === "ArrowDown") {
 			ev.preventDefault();
 			moveSelection(1);
@@ -1922,6 +2376,7 @@ function init(): void {
 		}
 	});
 
+	wireLongPress();
 	setView(state.view);
 	// The library answer depends on the admin cookie; know the state first
 	// so the first render already shows the admin controls.

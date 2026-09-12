@@ -115,3 +115,119 @@ export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
 		);
 	});
 }
+
+export interface PromptOptions {
+	title: string;
+	message?: Child[];
+	/** Initial value of the field. */
+	value: string;
+	/** Text after the field, e.g. an extension the value gets. */
+	suffix?: string;
+	confirmLabel: string;
+	icon?: HTMLElement;
+}
+
+/** Ask for a line of text; resolves with it, or null when cancelled. */
+export function promptDialog(opts: PromptOptions): Promise<string | null> {
+	return new Promise((done) => {
+		let answer: string | null = null;
+		const input = h("input", {
+			type: "text",
+			class: "dialog-input",
+			value: opts.value,
+			autocomplete: "off",
+			autocapitalize: "off",
+			spellcheck: "false",
+			"aria-label": opts.title,
+		});
+		const submit = h(
+			"button",
+			{ type: "submit", class: "button primary" },
+			opts.confirmLabel,
+		);
+		const dialog = openDialog(
+			{ focus: input, onClose: () => done(answer) },
+			opts.icon ?? null,
+			h("h2", {}, opts.title),
+			opts.message ? h("p", { class: "dialog-text" }, ...opts.message) : null,
+			h(
+				"form",
+				{
+					class: "dialog-form",
+					onsubmit: (ev: Event) => {
+						ev.preventDefault();
+						if (!input.value.trim()) {
+							input.focus();
+							return;
+						}
+						answer = input.value.trim();
+						dialog.close();
+					},
+				},
+				h(
+					"div",
+					{ class: "dialog-field" },
+					input,
+					opts.suffix
+						? h("span", { class: "dialog-suffix" }, opts.suffix)
+						: null,
+				),
+				h(
+					"div",
+					{ class: "dialog-actions" },
+					h(
+						"button",
+						{ type: "button", class: "button", onclick: () => dialog.close() },
+						"Cancel",
+					),
+					submit,
+				),
+			),
+		);
+		input.select();
+	});
+}
+
+/**
+ * Show `text` in a box the user can copy from, for when the clipboard API
+ * is not available (a plain-http page on the network) or refused.
+ */
+export function copyFallbackDialog(title: string, text: string): void {
+	const area = h("textarea", {
+		class: "dialog-textarea",
+		readonly: true,
+		spellcheck: "false",
+		"aria-label": title,
+	});
+	area.value = text;
+	const copy = h(
+		"button",
+		{
+			type: "button",
+			class: "button primary",
+			onclick: () => {
+				area.focus();
+				area.select();
+				// The one way left that works without a secure context.
+				const ok = document.execCommand("copy");
+				copy.replaceChildren(ok ? "Copied" : "Select and copy by hand");
+			},
+		},
+		"Copy",
+	);
+	const dialog = openDialog(
+		{ focus: copy },
+		h("h2", {}, title),
+		area,
+		h(
+			"div",
+			{ class: "dialog-actions" },
+			h(
+				"button",
+				{ type: "button", class: "button", onclick: () => dialog.close() },
+				"Close",
+			),
+			copy,
+		),
+	);
+}

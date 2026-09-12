@@ -26,7 +26,7 @@ import { AdminSessions, HiddenItems } from "./admin.ts";
 import { FetchJobs, JobError } from "./jobs.ts";
 import { scanItemTree, scanLibrary } from "./library.ts";
 import { extractZip, UnzipError } from "./unzip.ts";
-import { zipDirectory } from "./zip.ts";
+import { cleanArchiveName, zipDirectories, zipDirectory } from "./zip.ts";
 
 export interface BrowserOptions {
 	/** Preferred port; falls back to a free one when taken. Default 3737. */
@@ -95,7 +95,7 @@ export function parseFilePath(
 	pathname: string,
 	allowDirectory = false,
 ): string[] | null {
-	let rel: string[];
+	let rel: string;
 	try {
 		rel = pathname
 			.replace(
@@ -103,12 +103,26 @@ export function parseFilePath(
 				"",
 			)
 			.split("/")
-			.map((s) => decodeURIComponent(s));
+			.map((s) => decodeURIComponent(s))
+			.join("/");
 	} catch {
 		return null;
 	}
+	return parseDirectory(rel, allowDirectory ? 1 : 2);
+}
+
+/**
+ * The segments of a "/"-joined item directory as the client sends it in a
+ * request body, or null when a segment is empty, `.`/`..` or otherwise
+ * unusable.
+ */
+export function parseDirectory(
+	directory: string,
+	minSegments = 1,
+): string[] | null {
+	const rel = directory.split("/");
 	if (
-		rel.length < (allowDirectory ? 1 : 2) ||
+		rel.length < minSegments ||
 		rel.some((s) => !s || s === "." || s === ".." || s.includes("\0"))
 	)
 		return null;
@@ -122,7 +136,11 @@ export function resolveFilePath(
 	allowDirectory = false,
 ): string | null {
 	const rel = parseFilePath(pathname, allowDirectory);
-	if (!rel) return null;
+	return rel && resolvePath(root, rel);
+}
+
+/** The path of `rel` (see `parseDirectory`) inside `root`, or null. */
+export function resolvePath(root: string, rel: string[]): string | null {
 	const full = resolve(root, ...rel);
 	const base = resolve(root);
 	if (full !== base && !full.startsWith(base + sep)) return null;
@@ -159,9 +177,9 @@ async function serveManifest(path: string): Promise<Response> {
 }
 
 async function serveFile(ctx: ServerContext, req: Request): Promise<Response> {
-	const pathname = new URL(req.url).pathname;
-	const path = resolveFilePath(ctx.root, pathname);
-	if (!path || (await ctx.concealed(req, pathname)))
+	const rel = parseFilePath(new URL(req.url).pathname);
+	const path = rel && resolvePath(ctx.root, rel);
+	if (!rel || !path || (await ctx.concealed(req, rel)))
 		return new Response("Not found", { status: 404 });
 	if (path.endsWith(MANIFEST_SUFFIX)) return serveManifest(path);
 	const file = Bun.file(path);
@@ -220,8 +238,8 @@ interface ServerContext {
 	jobs: FetchJobs;
 	admin: AdminSessions;
 	hidden: HiddenItems;
-	/** Whether `pathname` (a files/item/zip/fetch route) is inside a hidden item the requester may not see. */
-	concealed(req: Request, pathname: string): Promise<boolean>;
+	/** Whether `rel` (a file or item path) is inside a hidden item the requester may not see. */
+	concealed(req: Request, rel: string[]): Promise<boolean>;
 }
 
 const NO_STORE = { "cache-control": "no-store" };
@@ -247,22 +265,74 @@ export async function deleteItemDirectory(
 	}
 }
 
+/** `zipDirectory` override: manifests go into archives without their keys. */
+function redactOverride(path: string): Promise<Uint8Array | null> {
+	return path.endsWith(MANIFEST_SUFFIX)
+		? redactedManifestBytes(path)
+		: Promise.resolve(null);
+}
+
 function listen(ctx: ServerContext) {
 	const { root } = ctx;
 	/** Resolve an item directory route, or answer why not. */
 	const itemDirectory = async (
 		req: Request,
 	): Promise<{ rel: string[]; path: string } | Response> => {
-		const pathname = new URL(req.url).pathname;
-		const rel = parseFilePath(pathname, true);
-		const path = resolveFilePath(root, pathname, true);
-		if (!rel || !path || (await ctx.concealed(req, pathname)))
+		const rel = parseFilePath(new URL(req.url).pathname, true);
+		const path = rel && resolvePath(root, rel);
+		if (!rel || !path || (await ctx.concealed(req, rel)))
 			return new Response("Not found", { status: 404 });
 		const s = await Bun.file(path)
 			.stat()
 			.catch(() => null);
 		if (!s?.isDirectory()) return new Response("Not found", { status: 404 });
 		return { rel, path };
+	};
+	/**
+	 * Resolve the item directories a selection names (a request body), or
+	 * answer why not: anything unusable, missing or concealed from the
+	 * requester fails the whole request.
+	 */
+	const itemDirectories = async (
+		req: Request,
+		directories: unknown,
+	): Promise<{ rel: string[]; path: string }[] | Response> => {
+		if (
+			!Array.isArray(directories) ||
+			directories.length === 0 ||
+			!directories.every((d): d is string => typeof d === "string")
+		)
+			return new Response("Bad request", { status: 400 });
+		const out: { rel: string[]; path: string }[] = [];
+		const seen = new Set<string>();
+		for (const directory of directories) {
+			if (seen.has(directory)) continue;
+			seen.add(directory);
+			const rel = parseDirectory(directory);
+			const path = rel && resolvePath(root, rel);
+			if (!rel || !path || (await ctx.concealed(req, rel)))
+				return new Response(`Not found: ${directory}`, { status: 404 });
+			const s = await Bun.file(path)
+				.stat()
+				.catch(() => null);
+			if (!s?.isDirectory())
+				return new Response(`Not found: ${directory}`, { status: 404 });
+			out.push({ rel, path });
+		}
+		return out;
+	};
+	const startFetch = async (
+		directories: string[],
+		name: string | null = null,
+	): Promise<Response> => {
+		try {
+			const status = await ctx.jobs.start(directories, name);
+			return Response.json(status, { status: 201, headers: NO_STORE });
+		} catch (err) {
+			if (err instanceof JobError)
+				return new Response(err.message, { status: err.status });
+			throw err;
+		}
 	};
 	const requireAdmin = (req: Request): Response | null =>
 		ctx.admin.isAdmin(req)
@@ -290,17 +360,38 @@ function listen(ctx: ServerContext) {
 				const tree = await scanItemTree(root, dir.rel.join("/"));
 				return Response.json(tree, { headers: NO_STORE });
 			},
+			// A selection of items as one zip with a folder per item. A form
+			// post (not JSON) so the browser can save the answer as a download.
+			"/api/zip": {
+				POST: async (req) => {
+					const form = await req.formData().catch(() => null);
+					if (!form) return new Response("Bad request", { status: 400 });
+					const dirs = await itemDirectories(req, form.getAll("directory"));
+					if (dirs instanceof Response) return dirs;
+					const nameField = form.get("name");
+					const name = cleanArchiveName(
+						typeof nameField === "string" ? nameField : null,
+					);
+					const stream = await zipDirectories(
+						dirs.map((d) => d.path),
+						{ rootName: name, override: redactOverride },
+					);
+					log.info(`Zipping ${dirs.length} items as '${name}' for download`);
+					return new Response(stream, {
+						headers: {
+							"content-type": "application/zip",
+							...NO_STORE,
+							"content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}.zip`,
+						},
+					});
+				},
+			},
 			"/api/zip/*": async (req) => {
 				const dir = await itemDirectory(req);
 				if (dir instanceof Response) return dir;
 				const { path } = dir;
 				const name = path.split(sep).pop() ?? "item";
-				const stream = await zipDirectory(path, {
-					override: (p) =>
-						p.endsWith(MANIFEST_SUFFIX)
-							? redactedManifestBytes(p)
-							: Promise.resolve(null),
-				});
+				const stream = await zipDirectory(path, { override: redactOverride });
 				log.info(`Zipping '${name}' for download`);
 				return new Response(stream, {
 					headers: {
@@ -459,14 +550,24 @@ function listen(ctx: ServerContext) {
 				POST: async (req) => {
 					const dir = await itemDirectory(req);
 					if (dir instanceof Response) return dir;
+					return startFetch([dir.rel.join("/")]);
+				},
+			},
+			// A selection: `{ directories, name }`, one zip with a folder per item.
+			"/api/fetch": {
+				POST: async (req) => {
+					let body: { directories?: unknown; name?: unknown };
 					try {
-						const status = await ctx.jobs.start(dir.rel.join("/"));
-						return Response.json(status, { status: 201, headers: NO_STORE });
-					} catch (err) {
-						if (err instanceof JobError)
-							return new Response(err.message, { status: err.status });
-						throw err;
+						body = (await req.json()) as typeof body;
+					} catch {
+						return new Response("Bad request", { status: 400 });
 					}
+					const dirs = await itemDirectories(req, body.directories);
+					if (dirs instanceof Response) return dirs;
+					return startFetch(
+						dirs.map((d) => d.rel.join("/")),
+						typeof body.name === "string" ? body.name : null,
+					);
 				},
 			},
 			"/api/reveal": {
@@ -533,10 +634,8 @@ export async function serveDownloadBrowser(
 		jobs,
 		admin,
 		hidden,
-		async concealed(req, pathname) {
-			if (admin.isAdmin(req)) return false;
-			const rel = parseFilePath(pathname, true);
-			return rel !== null && (await hidden.covers(rel));
+		async concealed(req, rel) {
+			return !admin.isAdmin(req) && (await hidden.covers(rel));
 		},
 	};
 	let server: ReturnType<typeof listen>;

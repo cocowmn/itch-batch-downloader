@@ -39,6 +39,16 @@ The folder icon next to *Open on itch.io* is the download button. When both ways
 
 ![Download menu](screenshots/download-menu.png)
 
+## Selecting several items
+
+Shift+click an item — or press and hold it, on a phone — and a bar appears at the bottom of the screen: the selection has begun. From then on a plain click toggles an item in or out, `⌘A` / `Ctrl+A` takes everything the filter currently shows, and `Esc` (or the × on the bar) clears the selection and puts the browser back to normal. The bar counts the items and their total size and offers what can be done with all of them at once:
+
+- **Copy details** puts a JSON array on the clipboard with the manifest of every selected item, in the form the server serves them (no download keys). An item without a manifest contributes what the library knows about it — title, author, tags, folder, files.
+- **Download** follows the same rules as the download button of a single item: when every selected item can be fetched from itch.io again it opens the menu of *Download folders* / *Download from itch.io*, otherwise it downloads the folders straight away. Either way you get one zip holding a folder for each item, and a small dialog asks what to call it — `2026-09-12--itch.io-downloads` unless you have a better idea. *Download from itch.io* fetches the items one after the other as a single job; if one of them fails the others still arrive, and the toast at the end says which did not.
+- **Delete** (admins only) removes every selected folder from disk after one confirmation.
+
+![Three items selected, the bar at the bottom](screenshots/selection.png)
+
 ## Files
 
 The Files section is a file browser. Folders expand in place at any depth, and any folder can be *flattened* — the button on its row, or the one in the section header for all of them — to list everything inside it at once, images first. That turns a sprite pack with a dozen sub-folders into one scrollable list of pictures. Every row has a download button, and next to it the reveal-in-Finder button.
@@ -59,7 +69,7 @@ With `admin_password` set in `appconfig.toml`, the library icon in the top bar o
 
 - **Hide item** takes an item out of the library for everyone else — files, zip and "Download from itch.io" stop being served for it. The eye button that appears next to refresh shows hidden items again (marked *hidden*), and the top bar counts them.
 - **Unzip** — the icon of every `.zip` in the file list turns into an open-package button on hover; *Unzip all* at the top of the panel extracts every archive at the item's top level. Extraction follows Archive Utility's rules and never overwrites anything.
-- **Delete item** at the bottom, in red, removes the folder from disk after a confirmation.
+- **Delete item** at the bottom, in red, removes the folder from disk after a confirmation. The selection bar's *Delete* does the same for several items at once.
 
 ![Inspector with admin features](screenshots/admin.png)
 
@@ -78,4 +88,6 @@ Anyone who can reach the port can browse and download the library — the keys n
 | `/`, `⌘K`, `Ctrl+K` | Focus the filter |
 | `1` `2` `3` | Grid, list, gallery view |
 | `←` `→` | Previous / next item (gallery), previous / next file (viewer) |
-| `Esc` | Close the viewer or the inspector; in the filter box, clear it |
+| `Shift`+click, press and hold | Start selecting items |
+| `⌘A`, `Ctrl+A` | Select every item the filter shows |
+| `Esc` | Clear the selection; close the viewer or the inspector; in the filter box, clear it |
