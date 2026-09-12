@@ -45,6 +45,7 @@ Shift+click an item — or press and hold it, on a phone — and a bar appears a
 
 - **Copy details** puts a JSON array on the clipboard with the manifest of every selected item, in the form the server serves them (no download keys). An item without a manifest contributes what the library knows about it — title, author, tags, folder, files.
 - **Download** follows the same rules as the download button of a single item: when every selected item can be fetched from itch.io again it opens the menu of *Download folders* / *Download from itch.io*, otherwise it downloads the folders straight away. Either way you get one zip holding a folder for each item, and a small dialog asks what to call it — `2026-09-12--itch.io-downloads` unless you have a better idea. *Download from itch.io* fetches the items one after the other as a single job; if one of them fails the others still arrive, and the toast at the end says which did not.
+- **Hide / unhide** (admins only, the eye button) hides every selected item; once everything in the selection is hidden the same button unhides it again.
 - **Delete** (admins only) removes every selected folder from disk after one confirmation.
 
 ![Three items selected, the bar at the bottom](screenshots/selection.png)
@@ -69,7 +70,7 @@ With `admin_password` set in `appconfig.toml`, the library icon in the top bar o
 
 - **Hide item** takes an item out of the library for everyone else — files, zip and "Download from itch.io" stop being served for it. The eye button that appears next to refresh shows hidden items again (marked *hidden*), and the top bar counts them.
 - **Unzip** — the icon of every `.zip` in the file list turns into an open-package button on hover; *Unzip all* at the top of the panel extracts every archive at the item's top level. Extraction follows Archive Utility's rules and never overwrites anything.
-- **Delete item** at the bottom, in red, removes the folder from disk after a confirmation. The selection bar's *Delete* does the same for several items at once.
+- **Delete item** at the bottom, in red, removes the folder from disk after a confirmation. The selection bar's *Delete* does the same for several items at once, and its eye button hides or unhides the whole selection.
 
 ![Inspector with admin features](screenshots/admin.png)
 

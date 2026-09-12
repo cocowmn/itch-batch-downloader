@@ -1992,6 +1992,7 @@ function renderSelectionBar(): void {
 				h("span", { class: "label" }, "Copy details"),
 			),
 			selectionDownloadButton(items),
+			state.admin ? selectionHideButton(items) : null,
 			state.admin
 				? h(
 						"button",
@@ -2058,6 +2059,57 @@ function selectionDownloadButton(items: LibraryItem[]): HTMLElement {
 		fetchable ? icon("chevron-down") : null,
 	);
 	return button;
+}
+
+/**
+ * Admin: hide the selection, or unhide it once every item in it is hidden
+ * (so hiding and then changing one's mind is two clicks of the same button).
+ */
+function selectionHideButton(items: LibraryItem[]): HTMLElement {
+	const unhide = items.every((i) => i.hidden);
+	const what = `the selected item${items.length === 1 ? "" : "s"}`;
+	return h(
+		"button",
+		{
+			type: "button",
+			class: "button icon-only",
+			title: unhide
+				? `Show ${what} to everyone again`
+				: `Hide ${what} from everyone but admins`,
+			"aria-label": unhide ? "Unhide selected items" : "Hide selected items",
+			onclick: () => setHiddenItems(items, !unhide),
+		},
+		icon(unhide ? "eye" : "eye-off"),
+	);
+}
+
+async function setHiddenItems(
+	items: LibraryItem[],
+	hidden: boolean,
+): Promise<void> {
+	let changed = 0;
+	for (const item of items.filter((i) => i.hidden !== hidden)) {
+		try {
+			await adminApi.setHidden(item.directory, hidden);
+		} catch (err) {
+			adminFailed(err, `Could not ${hidden ? "hide" : "unhide"} ${item.title}`);
+			if (!state.admin) break;
+			continue;
+		}
+		item.hidden = hidden;
+		changed++;
+	}
+	if (changed) {
+		const what = `${changed} item${changed === 1 ? "" : "s"}`;
+		toast(
+			hidden
+				? state.showHidden
+					? `${what} now hidden.`
+					: `${what} now hidden; the eye button in the top bar shows hidden items.`
+				: `${what} visible again.`,
+		);
+	}
+	renderAll();
 }
 
 /** Today as `2026-09-12`, local time, for the default archive name. */
