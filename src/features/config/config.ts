@@ -1,8 +1,9 @@
 import { resolve } from "node:path";
-import type { Config } from "../../models/config.ts";
+import type { Config, DownloadPacing } from "../../models/config.ts";
 import { DownloadNameError, parseDownloadName } from "../naming/naming.ts";
 
 export const DEFAULT_CONFIG_FILE = "appconfig.toml";
+export const PACINGS: readonly DownloadPacing[] = ["spread", "eager"];
 
 export const DEFAULTS: Config = {
 	download_directory: "downloads",
@@ -18,6 +19,10 @@ export const DEFAULTS: Config = {
 	download_videos: true,
 	debug_logs: false,
 	log_download_progress: true,
+	download_delay: 5,
+	downloads_per_hour: 120,
+	download_pacing: "spread",
+	parallel_downloads: 1,
 	bundles: [],
 	authors: [],
 	products: [],
@@ -107,6 +112,26 @@ authors = []
 # Combined with \`bundles\` the run covers the bundles' items plus these.
 products = []
 
+# --- Rate limiting -----------------------------------------------------------
+# The defaults are deliberately gentle on itch.io
+
+# Seconds to pause after one item finishes before the next one starts. 0 = none.
+download_delay = 5
+
+# Maximum items started per hour (a rolling 60 minutes). 0 = no limit.
+downloads_per_hour = 120
+
+# How the hourly budget is spent:
+#   "spread" - one item every 3600 / downloads_per_hour seconds (120/h = every 30 s;
+#              with parallel_downloads > 1, that many items together, less often)
+#   "eager"  - as fast as download_delay allows until the budget is used up, then
+#              wait until the oldest start drops out of the hour window
+download_pacing = "spread"
+
+# Items processed at the same time. 1 = one after the other (recommended;
+# more than 1 interleaves the log and disables the progress bar).
+parallel_downloads = 1
+
 # Optional explicit browser executable for page captures.
 # chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
@@ -143,6 +168,10 @@ export interface ConfigOverrides {
 	debug_logs?: boolean;
 	log_download_progress?: boolean;
 	create_log?: boolean;
+	download_delay?: number;
+	downloads_per_hour?: number;
+	download_pacing?: DownloadPacing;
+	parallel_downloads?: number;
 	bundles?: string[];
 	authors?: string[];
 	products?: string[];
@@ -230,6 +259,33 @@ function validate(raw: unknown, path: string): Partial<Config> {
 			throw new ConfigError(`${path}: "${k}" must be true or false`);
 		(out as Record<string, unknown>)[k] = v;
 	};
+	const num = (k: keyof Config, opts: { integer?: boolean; min: number }) => {
+		const v = r[k];
+		if (v === undefined) return;
+		const what = opts.integer ? "a whole number" : "a number";
+		if (
+			typeof v !== "number" ||
+			!Number.isFinite(v) ||
+			v < opts.min ||
+			(opts.integer && !Number.isInteger(v))
+		) {
+			throw new ConfigError(
+				`${path}: "${k}" must be ${what} of at least ${opts.min}`,
+			);
+		}
+		(out as Record<string, unknown>)[k] = v;
+	};
+	const oneOf = (k: keyof Config, values: readonly string[]) => {
+		const v = r[k];
+		if (v === undefined) return;
+		const lower = typeof v === "string" ? v.trim().toLowerCase() : null;
+		if (lower === null || !values.includes(lower)) {
+			throw new ConfigError(
+				`${path}: "${k}" must be one of ${values.map((x) => `"${x}"`).join(", ")}`,
+			);
+		}
+		(out as Record<string, unknown>)[k] = lower;
+	};
 	const list = (k: keyof Config) => {
 		const v = r[k];
 		if (v === undefined) return;
@@ -259,6 +315,10 @@ function validate(raw: unknown, path: string): Partial<Config> {
 	bool("debug_logs");
 	bool("log_download_progress");
 	bool("create_log");
+	num("download_delay", { min: 0 });
+	num("downloads_per_hour", { integer: true, min: 0 });
+	oneOf("download_pacing", PACINGS);
+	num("parallel_downloads", { integer: true, min: 1 });
 	list("bundles");
 	list("authors");
 	list("products");

@@ -1,8 +1,13 @@
 import type { Config } from "../../models/config.ts";
+import { sleep } from "../../utils/abort.ts";
 import { log } from "../../utils/log.ts";
+import { formatDuration } from "../../utils/time.ts";
 import { CookieJar } from "./cookie-jar.ts";
 
 const MAX_REDIRECTS = 5;
+/** Pause after an HTTP 429 without a usable Retry-After header. */
+const DEFAULT_BACKOFF_MS = 60_000;
+const MAX_BACKOFF_MS = 3_600_000;
 const USER_AGENT =
 	"itch-batch-downloader/0.2.0 (+https://github.com/alteregocc/itch-batch-downloader)";
 
@@ -27,6 +32,12 @@ export class HttpError extends Error {
  */
 export class ItchClient {
 	/**
+	 * After an HTTP 429 every request of this client (all workers) waits until
+	 * this time before going out.
+	 */
+	private pausedUntil = 0;
+
+	/**
 	 * @param signal Aborts every request of this client (a cancelled
 	 *   download-browser job); requests may also pass their own.
 	 */
@@ -50,7 +61,9 @@ export class ItchClient {
 		let current = url;
 		let method = init.method ?? "GET";
 		let body = init.body;
+		let retried = false;
 		for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+			await this.waitIfPaused(init.signal ?? this.signal);
 			const headers = new Headers(init.headers);
 			headers.set("User-Agent", USER_AGENT);
 			if (this.shouldSendCookies(current)) {
@@ -85,13 +98,28 @@ export class ItchClient {
 				}
 				continue;
 			}
-			if (res.status === 429)
+			if (res.status === 429) {
+				const pause = retryAfterMs(res.headers.get("retry-after"));
+				this.pausedUntil = Math.max(this.pausedUntil, Date.now() + pause);
 				log.warn(
-					`Rate limited by ${new URL(current).hostname} (HTTP 429); slow down or retry later.`,
+					`Rate limited by ${new URL(current).hostname} (HTTP 429); pausing all requests for ${formatDuration(pause)}${retried ? "" : ", then retrying"}.`,
 				);
+				// One retry after the pause; a second 429 goes back to the caller.
+				if (!retried) {
+					retried = true;
+					await res.body?.cancel();
+					hop--;
+					continue;
+				}
+			}
 			return res;
 		}
 		throw new Error(`Too many redirects for ${url}`);
+	}
+
+	private async waitIfPaused(signal?: AbortSignal): Promise<void> {
+		const wait = this.pausedUntil - Date.now();
+		if (wait > 0) await sleep(wait, signal);
 	}
 
 	get(url: string, init: RequestInit = {}): Promise<Response> {
@@ -116,6 +144,23 @@ export class ItchClient {
 		if (!res.ok) throw new HttpError(res.status, url);
 		return res.text();
 	}
+}
+
+/**
+ * The pause a 429 asks for: `Retry-After` in seconds or as an HTTP date,
+ * `DEFAULT_BACKOFF_MS` when absent or unreadable, capped at an hour.
+ */
+export function retryAfterMs(header: string | null): number {
+	if (header === null) return DEFAULT_BACKOFF_MS;
+	const value = header.trim();
+	let ms: number;
+	if (/^\d+$/.test(value)) ms = Number(value) * 1000;
+	else {
+		const date = Date.parse(value);
+		if (Number.isNaN(date)) return DEFAULT_BACKOFF_MS;
+		ms = date - Date.now();
+	}
+	return Math.min(MAX_BACKOFF_MS, Math.max(0, ms));
 }
 
 /** The client of a run: the session cookies from `config.cookie_file`. */

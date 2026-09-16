@@ -23,11 +23,24 @@ export function findEmbeddedVideos(html: string): string[] {
 	return urls;
 }
 
+export interface VideoOptions {
+	/**
+	 * Log yt-dlp's per-percentage progress lines. When false only the start
+	 * and the end of each download are logged, like log_download_progress.
+	 */
+	showProgress?: boolean;
+}
+
+/** yt-dlp's live progress: `[download]  81.9% of 35.77MiB at 14.83MiB/s ETA 00:00`. */
+const PROGRESS_LINE = /^\[download\]\s+\d+(?:\.\d+)?% of/;
+
 export class VideoDownloader {
 	private readonly binary: string | null;
 	private warned = false;
+	private readonly showProgress: boolean;
 
-	constructor(ytDlpPath: string) {
+	constructor(ytDlpPath: string, opts: VideoOptions = {}) {
+		this.showProgress = opts.showProgress ?? true;
 		this.binary =
 			Bun.which(ytDlpPath) ??
 			(ytDlpPath.includes("/") || ytDlpPath.includes("\\") ? ytDlpPath : null);
@@ -74,7 +87,10 @@ export class VideoDownloader {
 			const kill = () => proc.kill();
 			signal?.addEventListener("abort", kill, { once: true });
 			await Promise.all([
-				pipeLines(proc.stdout, (l) => log.info(`${PREFIX} ${l}`)),
+				pipeLines(proc.stdout, (l) => {
+					if (!this.showProgress && PROGRESS_LINE.test(l)) return;
+					log.info(`${PREFIX} ${l}`);
+				}),
 				pipeLines(proc.stderr, (l) => logStderr(l)),
 			]);
 			const code = await proc.exited;

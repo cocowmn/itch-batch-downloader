@@ -24,3 +24,14 @@ export function compactTimestamp(d = new Date()): string {
 		`${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`
 	);
 }
+
+/** `7 h 30 min`, `48 min`, `27 s`: a rounded, human readable duration. */
+export function formatDuration(ms: number): string {
+	const seconds = Math.round(ms / 1000);
+	if (seconds < 60) return `${seconds} s`;
+	const minutes = Math.round(seconds / 60);
+	if (minutes < 60) return `${minutes} min`;
+	const hours = Math.floor(minutes / 60);
+	const rest = minutes % 60;
+	return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}

@@ -186,7 +186,9 @@ export class FetchJobs {
 				chromePath: config.chrome_path,
 			});
 			const videos = config.download_videos
-				? new VideoDownloader(config.yt_dlp_path)
+				? new VideoDownloader(config.yt_dlp_path, {
+						showProgress: config.log_download_progress,
+					})
 				: null;
 			const runStarted = new Date();
 			const name = parseDownloadName(config.download_name);

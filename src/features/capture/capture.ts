@@ -25,6 +25,8 @@ const IMAGE_WAIT_MS = 30_000;
 export class PageCapturer {
 	private view: Bun.WebView | null = null;
 	private disabled = false;
+	/** Captures run one at a time: parallel workers share the single WebView. */
+	private queue: Promise<unknown> = Promise.resolve();
 
 	constructor(
 		private readonly jar: CookieJar,
@@ -83,6 +85,23 @@ export class PageCapturer {
 	 * (i.e. nothing new was downloaded for the item).
 	 */
 	async capture(
+		url: string,
+		dir: string,
+		prefix: string,
+		force: boolean,
+		signal?: AbortSignal,
+	): Promise<void> {
+		if (!this.enabled) return;
+		throwIfAborted(signal);
+		const turn = this.queue.then(() =>
+			this.captureNow(url, dir, prefix, force, signal),
+		);
+		// A failed capture must not block the ones queued behind it.
+		this.queue = turn.catch(() => {});
+		return turn;
+	}
+
+	private async captureNow(
 		url: string,
 		dir: string,
 		prefix: string,

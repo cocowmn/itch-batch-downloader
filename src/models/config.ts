@@ -1,3 +1,5 @@
+export type DownloadPacing = "spread" | "eager";
+
 export interface Config {
 	download_directory: string;
 
@@ -15,6 +17,18 @@ export interface Config {
 	debug_logs: boolean;
 	log_download_progress: boolean;
 	create_log: boolean;
+
+	/** Seconds to pause after an item finishes before the next starts (per worker). */
+	download_delay: number;
+
+	/** Max items started per rolling hour; 0 = unlimited. */
+	downloads_per_hour: number;
+
+	/** How the hourly budget is spent: evenly spaced, or as fast as allowed then wait. */
+	download_pacing: DownloadPacing;
+
+	/** Items processed at the same time. */
+	parallel_downloads: number;
 	bundles: string[];
 	authors: string[];
 

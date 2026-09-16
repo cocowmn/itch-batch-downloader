@@ -5,6 +5,7 @@ import {
 	type ConfigOverrides,
 	DEFAULT_CONFIG_FILE,
 	loadConfig,
+	PACINGS,
 } from "./features/config/config.ts";
 import { printProductList, run } from "./features/download/pipeline.ts";
 import { fetchOwnedBundles } from "./features/itch/bundles.ts";
@@ -13,7 +14,7 @@ import {
 	reportUnclaimed,
 	selectProducts,
 } from "./features/selection/selection.ts";
-import type { Config } from "./models/config.ts";
+import type { Config, DownloadPacing } from "./models/config.ts";
 import { log } from "./utils/log.ts";
 import { DEFAULT_PORT, serveDownloadBrowser } from "./www/server/server.ts";
 
@@ -57,6 +58,12 @@ Options:
       --progress / --no-progress
                             Show/hide the live download progress bar
       --log / --no-log      Enable/disable writing downloads.log
+      --delay <seconds>     Pause between items (download_delay)
+      --per-hour <n>        Max items started per hour, 0 = unlimited
+                            (downloads_per_hour)
+      --pacing <spread|eager>
+                            How the hourly budget is spent (download_pacing)
+      --parallel <n>        Items processed at the same time (parallel_downloads)
       --dry-run             Resolve the selection and list it, download nothing
       --restart             Ignore the resume file and start from the first item
       --skip <n>            Skip the first n items of the selection
@@ -109,6 +116,10 @@ function parseCli(argv: string[]) {
 			"yt-dlp-path": { type: "string" },
 			progress: { type: "boolean" },
 			log: { type: "boolean" },
+			delay: { type: "string" },
+			"per-hour": { type: "string" },
+			pacing: { type: "string" },
+			parallel: { type: "string" },
 			"dry-run": { type: "boolean" },
 			restart: { type: "boolean" },
 			skip: { type: "string" },
@@ -134,6 +145,16 @@ function parseCli(argv: string[]) {
 		debug_logs: values.debug,
 		log_download_progress: values.progress,
 		create_log: values.log,
+		download_delay: parseNumberOption("--delay", values.delay, { min: 0 }),
+		downloads_per_hour: parseNumberOption("--per-hour", values["per-hour"], {
+			integer: true,
+			min: 0,
+		}),
+		download_pacing: parsePacing(values.pacing),
+		parallel_downloads: parseNumberOption("--parallel", values.parallel, {
+			integer: true,
+			min: 1,
+		}),
 		bundles: values.bundle,
 		authors: values.author,
 		products: values.product,
@@ -156,13 +177,37 @@ function parseCli(argv: string[]) {
 }
 
 function parseSkip(value: string | undefined): number {
-	if (value === undefined) return 0;
+	return parseNumberOption("--skip", value, { integer: true, min: 0 }) ?? 0;
+}
+
+function parseNumberOption(
+	flag: string,
+	value: string | undefined,
+	opts: { integer?: boolean; min: number },
+): number | undefined {
+	if (value === undefined) return undefined;
 	const n = Number(value);
-	if (!Number.isInteger(n) || n < 0)
+	if (
+		value.trim() === "" ||
+		!Number.isFinite(n) ||
+		n < opts.min ||
+		(opts.integer && !Number.isInteger(n))
+	) {
 		throw new ConfigError(
-			`--skip expects a non-negative whole number, got "${value}"`,
+			`${flag} expects ${opts.integer ? "a whole number" : "a number"} of at least ${opts.min}, got "${value}"`,
 		);
+	}
 	return n;
+}
+
+function parsePacing(value: string | undefined): DownloadPacing | undefined {
+	if (value === undefined) return undefined;
+	const lower = value.trim().toLowerCase();
+	if (!(PACINGS as readonly string[]).includes(lower))
+		throw new ConfigError(
+			`--pacing expects ${PACINGS.join(" or ")}, got "${value}"`,
+		);
+	return lower as DownloadPacing;
 }
 
 function parsePort(value: string | undefined): number | undefined {

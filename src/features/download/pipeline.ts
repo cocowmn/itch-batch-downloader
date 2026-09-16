@@ -7,9 +7,10 @@ import type { Config } from "../../models/config.ts";
 import type { Product } from "../../models/product.ts";
 import { isAbortError, throwIfAborted } from "../../utils/abort.ts";
 import { log } from "../../utils/log.ts";
+import { runPool } from "../../utils/pool.ts";
 import { withRetries } from "../../utils/retry.ts";
 import { slugify } from "../../utils/slugify.ts";
-import { dateStamp } from "../../utils/time.ts";
+import { dateStamp, formatDuration } from "../../utils/time.ts";
 import { downloadCoverArtwork } from "../artwork/artwork.ts";
 import { PageCapturer } from "../capture/capture.ts";
 import { createClient, type ItchClient } from "../itch/client.ts";
@@ -35,6 +36,7 @@ import {
 	selectProducts,
 } from "../selection/selection.ts";
 import { VideoDownloader } from "../videos/videos.ts";
+import { RateLimiter } from "./limiter.ts";
 import { selectionFingerprint, Tracker } from "./tracker.ts";
 import { downloadFile } from "./transfer.ts";
 
@@ -66,9 +68,10 @@ export interface ItemContext {
 }
 
 export async function run(
-	config: Config,
+	initialConfig: Config,
 	opts: RunOptions = {},
 ): Promise<void> {
+	const config = { ...initialConfig };
 	await mkdir(config.download_directory, { recursive: true });
 	if (config.create_log && !opts.dryRun)
 		log.setFile(join(config.download_directory, LOG_FILE));
@@ -85,8 +88,23 @@ export async function run(
 	reportUnclaimed(selection.unclaimed);
 	warnAboutCollisions(name, products, runStarted);
 
+	const parallel = config.parallel_downloads;
+	const limiter = new RateLimiter({
+		delay: config.download_delay,
+		perHour: config.downloads_per_hour,
+		pacing: config.download_pacing,
+		parallel,
+	});
+	if (parallel > 1) {
+		log.warn(
+			`Processing ${parallel} items at a time; itch.io may answer with HTTP 429. The progress bar is off while running in parallel.`,
+		);
+		config.log_download_progress = false;
+	}
+
 	if (opts.dryRun) {
 		printProductList(selection, name, runStarted);
+		logRateLimits(limiter, parallel, products.length);
 		return;
 	}
 
@@ -106,6 +124,10 @@ export async function run(
 			`Resuming from item ${resumeFrom} (delete ${tracker.path} or use --restart to start over).`,
 		);
 	}
+	const remaining = products
+		.map((product, i) => ({ product, number: i + 1 }))
+		.filter(({ number }) => number >= resumeFrom);
+	logRateLimits(limiter, parallel, remaining.length);
 
 	const capturer = new PageCapturer(client.jar, {
 		png: config.create_png,
@@ -113,36 +135,75 @@ export async function run(
 		chromePath: config.chrome_path,
 	});
 	const videos = config.download_videos
-		? new VideoDownloader(config.yt_dlp_path)
+		? new VideoDownloader(config.yt_dlp_path, {
+				showProgress: config.log_download_progress,
+			})
 		: null;
 
-	try {
-		for (const [i, product] of products.entries()) {
-			const number = i + 1;
-			if (number < resumeFrom) continue;
+	// The resume file points at the lowest item still in flight, so a resume
+	// with several workers may redo up to parallel - 1 finished items.
+	const inFlight = new Set<number>();
+	const saveProgress = async () => {
+		if (inFlight.size) await tracker.save(Math.min(...inFlight));
+	};
+	// Each worker's pause (download_delay) starts when its previous item ended.
+	const finishedAt = new Map<number, number>();
 
+	try {
+		await runPool(remaining, parallel, async ({ product, number }, _i, ctx) => {
+			const { lane, signal } = ctx;
+			inFlight.add(number);
+			await saveProgress();
+			await limiter.acquire({
+				item: number,
+				total: products.length,
+				previousFinishedAt: finishedAt.get(lane),
+				signal,
+			});
 			log.raw();
 			log.info(
 				`Analysing item ${number} of ${products.length}. Title: ${product.slug}`,
 			);
-			await tracker.save(number);
-			await processItem({
-				client,
-				config,
-				product,
-				index: number,
-				total: products.length,
-				runStarted,
-				name,
-				capturer,
-				videos,
-				downloadDir: config.download_directory,
-			});
-		}
+			try {
+				await processItem({
+					client,
+					config,
+					product,
+					index: number,
+					total: products.length,
+					runStarted,
+					name,
+					capturer,
+					videos,
+					downloadDir: config.download_directory,
+					signal,
+				});
+			} finally {
+				finishedAt.set(lane, Date.now());
+				inFlight.delete(number);
+			}
+			if (!signal.aborted) await saveProgress();
+		});
 		await tracker.save(0);
 	} finally {
 		capturer.close();
 	}
+}
+
+/** The rate limits of the run and the waiting time they add up to. */
+function logRateLimits(
+	limiter: RateLimiter,
+	parallel: number,
+	items: number,
+): void {
+	const estimate = limiter.estimate(items, parallel);
+	log.info(
+		`Rate limits: ${limiter.describe(parallel)}${
+			estimate !== null
+				? ` - ${items} items take at least ~${formatDuration(estimate)}`
+				: ""
+		}`,
+	);
 }
 
 /**

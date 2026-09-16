@@ -137,6 +137,12 @@ Every command accepts the same options:
       --progress / --no-progress
                             Show/hide the live download progress bar
       --log / --no-log      Enable/disable writing downloads.log
+      --delay <seconds>     Pause between items (download_delay)
+      --per-hour <n>        Max items started per hour, 0 = unlimited
+                            (downloads_per_hour)
+      --pacing <spread|eager>
+                            How the hourly budget is spent (download_pacing)
+      --parallel <n>        Items processed at the same time (parallel_downloads)
       --dry-run             Resolve the selection and list it, download nothing
       --restart             Ignore the resume file and start from the first item
       --skip <n>            Skip the first n items of the selection
@@ -262,6 +268,29 @@ Changing `download_name` does not move anything: the next run downloads into the
 
 Every item directory receives a hidden `.itchio` file (JSON: title, slug, author, public page URL, the template used — no keys). It is how the download browser finds items wherever the template put them, how it names items that have no manifest, and where it remembers that an admin hid the item; leave it in place.
 
+## Rate limiting
+
+A library of thousands of items would otherwise hammer the itch.io server for hours, so default rate limiting configuration options are provided on a **per item** basis — an item being one product with its download page, files, cover artwork, page capture and videos. The defaults are deliberately gentle; if your library has thousands of items, you can start downloading in the morning and let the script run throughout the day on your home computer. If that's not feasible, this configuration can be disabled.
+
+```toml
+download_delay = 5          # seconds to pause after an item before the next one starts
+downloads_per_hour = 120    # max items started per rolling hour, 0 = no limit
+download_pacing = "spread"  # "spread" or "eager"
+parallel_downloads = 1      # items processed at the same time
+```
+
+- **`download_delay`** is a pause between items (measured from the end of one to the start of the next). It is the only brake left when `downloads_per_hour = 0`.
+- **`downloads_per_hour`** caps how many items may *start* within any 60-minute window (a rolling window, not the clock hour, so there is no burst at the top of the hour).
+- **`download_pacing`** decides how the hourly budget is spent:
+  - `"spread"` starts items evenly, one every `3600 / downloads_per_hour` seconds — with the default 120 that is one item every 30 s, a 3000-item library in roughly a day;
+  - `"eager"` starts items as fast as `download_delay` allows until the budget is used up, then waits until the oldest start drops out of the window. Handy for small runs you want finished quickly.
+- The pause and the hourly budget both apply; whichever asks for the later start wins. Every wait longer than a second is logged (`Waiting 27 s before item 5 of 900 (downloads_per_hour = 120, spread)`), and the run logs its settings and a lower bound for the waiting time up front, also with `--dry-run`. Pressing `CTRL + C` during a wait is safe: the resume file already points at the item that was about to start.
+- **`parallel_downloads`** processes several items at once. It works against the purpose of the other settings, so it defaults to 1. The hourly budget is shared by all workers: with `"spread"` a full batch of `parallel_downloads` items fires together, then the next batch after `parallel_downloads × 3600 / downloads_per_hour` seconds (3 workers at 120/h = 3 items every 90 s); with `"eager"` the workers simply share the hour's count. The pause applies per worker. With more than one worker the log lines of the items interleave, the progress bar is turned off, page captures still happen one at a time (there is a single browser) and a resume after an interruption may redo up to `parallel_downloads - 1` finished items.
+
+Independently of these settings, an HTTP 429 from itch.io pauses every request for the time in the server's `Retry-After` header (a minute when there is none), then the request is retried once.
+
+The download browser's *Download from itch.io* jobs are not paced by these settings — they are small, user-initiated fetches — but they get the 429 back-off too.
+
 ## Download progress tracking
 
 While running, a file named `itch-batch-downloader-track.txt` is kept in the download directory. It records the number of the item currently being processed (plus a fingerprint of the bundle/product/author selection), which lets the tool resume where it left off after an interruption.
@@ -384,6 +413,10 @@ download_videos = true
 debug_logs = false
 log_download_progress = true
 create_log = true
+download_delay = 5
+downloads_per_hour = 120
+download_pacing = "spread"
+parallel_downloads = 1
 bundles = []
 authors = []
 products = []
@@ -407,6 +440,10 @@ admin_password = "generated-on-first-run"
 | `debug_logs` | `false` | Verbose logging. |
 | `log_download_progress` | `true` | Live progress bar while downloading. When `false`, one line at the start (size), one with the current speed shortly after, one at completion. |
 | `create_log` | `true` | Append all console output to `<download_directory>/downloads.log`. |
+| `download_delay` | `5` | Seconds to pause after an item finishes before the next one starts (per worker). `0` = none. See [Rate limiting](#rate-limiting). |
+| `downloads_per_hour` | `120` | Maximum items started per rolling hour. `0` = no limit. |
+| `download_pacing` | `"spread"` | `"spread"` starts items evenly over the hour; `"eager"` starts them as fast as `download_delay` allows and then waits for the window to free up. |
+| `parallel_downloads` | `1` | Items processed at the same time. More than 1 interleaves the log, disables the progress bar and is hard on itch.io. |
 | `bundles` | `[]` | Bundle names, keys or URLs to limit the run to. Empty = whole library. |
 | `authors` | `[]` | Author slugs (or display names) to limit the run to. Empty = everyone. |
 | `products` | `[]` | Individual products of your library to download: page URL, download page URL, `author/game` or title. Added to the items of `bundles`, if any. |
@@ -431,7 +468,7 @@ Cross-compile with `bun build --compile --target=bun-windows-x64 src/cli.ts --ou
 
 ```bash
 bun install
-bun test              # unit tests (HTML parsers, cookies, config, filters, resume file, browser)
+bun test              # unit tests (HTML parsers, cookies, config, filters, rate limiter, resume file, browser)
 bun run typecheck     # tsc --noEmit for the tool and for the browser UI
 bun run format        # biome check --write
 ```

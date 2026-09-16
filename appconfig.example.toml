@@ -69,6 +69,26 @@ authors = []
 # Combined with `bundles` the run covers the bundles' items plus these.
 products = []
 
+# --- Rate limiting -----------------------------------------------------------
+# The defaults are deliberately gentle on itch.io
+
+# Seconds to pause after one item finishes before the next one starts. 0 = none.
+download_delay = 5
+
+# Maximum items started per hour (a rolling 60 minutes). 0 = no limit.
+downloads_per_hour = 120
+
+# How the hourly budget is spent:
+#   "spread" - one item every 3600 / downloads_per_hour seconds (120/h = every 30 s;
+#              with parallel_downloads > 1, that many items together, less often)
+#   "eager"  - as fast as download_delay allows until the budget is used up, then
+#              wait until the oldest start drops out of the hour window
+download_pacing = "spread"
+
+# Items processed at the same time. 1 = one after the other (recommended;
+# more than 1 interleaves the log and disables the progress bar).
+parallel_downloads = 1
+
 # Optional explicit browser executable for page captures.
 # chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 

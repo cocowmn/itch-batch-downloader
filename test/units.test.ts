@@ -8,6 +8,7 @@ import {
 	Tracker,
 } from "../src/features/download/tracker.ts";
 import { filenameFromResponse } from "../src/features/download/transfer.ts";
+import { ItchClient, retryAfterMs } from "../src/features/itch/client.ts";
 import { CookieJar } from "../src/features/itch/cookie-jar.ts";
 import {
 	bundleProductsToProducts,
@@ -347,6 +348,88 @@ describe("loadConfig", () => {
 			await expect(loadConfig(path)).rejects.toBeInstanceOf(ConfigError);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rate limits: gentle defaults, validation, overrides", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "ibd-"));
+		try {
+			const path = join(dir, "c.toml");
+			await Bun.write(path, "");
+			expect(await loadConfig(path)).toMatchObject({
+				download_delay: 5,
+				downloads_per_hour: 120,
+				download_pacing: "spread",
+				parallel_downloads: 1,
+			});
+			await Bun.write(
+				path,
+				'download_delay = 0.5\ndownloads_per_hour = 0\ndownload_pacing = "EAGER"\nparallel_downloads = 3\n',
+			);
+			expect(await loadConfig(path)).toMatchObject({
+				download_delay: 0.5,
+				downloads_per_hour: 0,
+				download_pacing: "eager",
+				parallel_downloads: 3,
+			});
+			expect(
+				await loadConfig(path, {
+					downloads_per_hour: 60,
+					parallel_downloads: 1,
+				}),
+			).toMatchObject({ downloads_per_hour: 60, parallel_downloads: 1 });
+			for (const bad of [
+				"download_delay = -1",
+				'download_delay = "5"',
+				"downloads_per_hour = 1.5",
+				'download_pacing = "fast"',
+				"parallel_downloads = 0",
+			]) {
+				await Bun.write(path, `${bad}\n`);
+				await expect(loadConfig(path)).rejects.toBeInstanceOf(ConfigError);
+			}
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("ItchClient rate limiting", () => {
+	test("retryAfterMs reads seconds, HTTP dates and falls back to a minute", () => {
+		expect(retryAfterMs(null)).toBe(60_000);
+		expect(retryAfterMs("garbage")).toBe(60_000);
+		expect(retryAfterMs("7")).toBe(7_000);
+		expect(retryAfterMs("999999")).toBe(3_600_000);
+		const soon = retryAfterMs(new Date(Date.now() + 30_000).toUTCString());
+		expect(soon).toBeGreaterThan(25_000);
+		expect(soon).toBeLessThanOrEqual(30_000);
+		expect(retryAfterMs(new Date(Date.now() - 30_000).toUTCString())).toBe(0);
+	});
+
+	test("a 429 pauses and is retried once", async () => {
+		const original = globalThis.fetch;
+		const statuses = [429, 200];
+		const seen: string[] = [];
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			seen.push(String(input));
+			const status = statuses.shift() ?? 200;
+			return new Response(status === 200 ? "ok" : "", {
+				status,
+				headers: status === 429 ? { "retry-after": "0" } : {},
+			});
+		}) as typeof fetch;
+		try {
+			const client = new ItchClient(new CookieJar());
+			const res = await client.get("https://itch.io/my-purchases");
+			expect(res.status).toBe(200);
+			expect(seen).toHaveLength(2);
+
+			statuses.push(429, 429);
+			const again = await client.get("https://itch.io/my-purchases");
+			expect(again.status).toBe(429);
+			expect(seen).toHaveLength(4);
+		} finally {
+			globalThis.fetch = original;
 		}
 	});
 });
