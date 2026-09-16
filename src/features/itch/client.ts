@@ -1,3 +1,4 @@
+import pkg from "../../../package.json";
 import type { Config } from "../../models/config.ts";
 import { sleep } from "../../utils/abort.ts";
 import { log } from "../../utils/log.ts";
@@ -8,8 +9,7 @@ const MAX_REDIRECTS = 5;
 /** Pause after an HTTP 429 without a usable Retry-After header. */
 const DEFAULT_BACKOFF_MS = 60_000;
 const MAX_BACKOFF_MS = 3_600_000;
-const USER_AGENT =
-	"itch-batch-downloader/0.2.0 (+https://github.com/alteregocc/itch-batch-downloader)";
+const USER_AGENT = `itch-batch-downloader/${pkg.version} (+https://github.com/alteregocc/itch-batch-downloader)`;
 
 export class NotAuthenticatedError extends Error {
 	constructor() {

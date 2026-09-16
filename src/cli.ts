@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { parseArgs } from "node:util";
+import pkg from "../package.json";
 import {
 	ConfigError,
 	type ConfigOverrides,
@@ -18,7 +19,8 @@ import type { Config, DownloadPacing } from "./models/config.ts";
 import { log } from "./utils/log.ts";
 import { DEFAULT_PORT, serveDownloadBrowser } from "./www/server/server.ts";
 
-const VERSION = "0.2.0";
+/** The one place to bump: "version" in package.json. */
+const VERSION = pkg.version;
 
 const USAGE = `itch-batch-downloader ${VERSION}
 

@@ -7,7 +7,14 @@
 	},
 	"files": {
 		"ignoreUnknown": true,
-		"includes": ["src/**", "test/**", "*.json", "!test/fixtures", "!bun.lock"]
+		"includes": [
+			"src/**",
+			"test/**",
+			"scripts/**",
+			"*.json",
+			"!test/fixtures",
+			"!bun.lock"
+		]
 	},
 	"formatter": {
 		"enabled": true,

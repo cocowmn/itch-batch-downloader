@@ -244,5 +244,6 @@ cookies*
 /downloads
 /itch-batch-downloader
 /itch-batch-downloader.exe
+/dist/
 /appconfig.toml
 *.bak

@@ -84,12 +84,36 @@ cookies.txt
 
 ### 3. Install and configure
 
+**Option A: a release build** — no Bun needed. Download the archive for your computer from the [releases page](https://github.com/cocowmn/itch-batch-downloader/releases):
+
+| Your computer | Archive |
+|---|---|
+| Mac with Apple Silicon (M1 or newer) | `…-macos-arm64.tar.gz` |
+| Mac with an Intel processor | `…-macos-x64.tar.gz` |
+| Windows | `…-windows-x64.zip` |
+| Windows on ARM (Snapdragon laptops) | `…-windows-arm64.zip` |
+| Linux | `…-linux-x64.tar.gz` (or `…-linux-arm64.tar.gz` on a Raspberry Pi or other ARM machine) |
+
+Note: I run a mac and have only ever tested this on said mac. I'm not sure if these other platform downloads actually work shrug emoji.
+
+Unpack it and put `cookies.txt` next to the binary. On macOS the binary is not code-signed, so the first launch is blocked by Gatekeeper; remove the quarantine flag once:
+
+```bash
+xattr -d com.apple.quarantine itch-batch-downloader
+chmod +x itch-batch-downloader      # only if your archive tool dropped the executable bit
+./itch-batch-downloader
+```
+
+On Windows run `itch-batch-downloader.exe` from a terminal (PowerShell or cmd) in the unpacked folder. In the rest of this README, read `bun start` as `./itch-batch-downloader` (or `itch-batch-downloader.exe`); everything else is the same. Chrome and yt-dlp are still separate installs (see [Requirements](#requirements)).
+
+**Option B: from source**
+
 ```bash
 bun install
 bun start
 ```
 
-The first run creates `appconfig.toml` next to the script and exits. Edit it (see [Configuration file](#configuration-file)) — at minimum check the download directory — then run again.
+Either way, the first run creates `appconfig.toml` next to the binary/script and exits. Edit it (see [Configuration file](#configuration-file)) — at minimum check the download directory — then run again.
 
 ### 4. Run
 
@@ -453,16 +477,26 @@ admin_password = "generated-on-first-run"
 
 The legacy `"ON"` / `"OFF"` strings from the old `.ini` file are still accepted for the boolean options.
 
-## Building a standalone executable
+## Building and publishing a release
 
-Bun can bundle the tool and the runtime into a single binary:
+Bun bundles the tool and its runtime into a single binary, and cross-compiles for other platforms from any machine:
 
 ```bash
-bun run build            # produces ./itch-batch-downloader (or .exe on Windows)
-./itch-batch-downloader list-bundles
+bun run build            # ./itch-batch-downloader (or .exe) for this machine
+bun run build:all        # dist/: an archive for every supported platform + SHA256SUMS.txt
+bun run build:all --only macos-arm64 --only windows-x64   # just some of them
 ```
 
-Cross-compile with `bun build --compile --target=bun-windows-x64 src/cli.ts --outfile itch-batch-downloader.exe` (see the [Bun docs](https://bun.com/docs/bundler/executables) for the list of targets). The browser and yt-dlp remain external requirements.
+`build:all` produces `itch-batch-downloader-<version>-<os>-<arch>.tar.gz` (macOS, Linux) and `.zip` (Windows) for macOS arm64/x64, Windows x64/arm64 and Linux x64/arm64, each holding the binary, `appconfig.example.toml`, `README.md` and `LICENSE`. The version comes from `"version"` in `package.json`; `--version` prints the same number.
+
+To publish a release:
+
+1. Bump `"version"` in `package.json` — `0.2.0` → `0.2.1` for bug fixes, `0.3.0` for new features — and commit.
+2. Tag it and push: `git tag v0.3.0 && git push && git push --tags`.
+3. `bun run build:all`.
+4. Create the GitHub release with the archives attached: `gh release create v0.3.0 dist/* --title "v0.3.0" --generate-notes`, or open *Releases → Draft a new release* on GitHub, pick the tag and drag the files from `dist/` onto the page.
+
+The binaries are not code-signed: macOS users clear the Gatekeeper flag once (see [Install and configure](#3-install-and-configure)); signing and notarisation would need an Apple Developer account. Windows icon and version metadata cannot be embedded when cross-compiling. The browser and yt-dlp remain external requirements.
 
 ## Development
 
