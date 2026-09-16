@@ -1,6 +1,6 @@
 {
 	"name": "itch-batch-downloader",
-	"version": "0.2.0",
+	"version": "0.0.1",
 	"description": "Batch download the items bound to your itch.io account, optionally limited to specific bundles or authors.",
 	"license": "GPL-3.0",
 	"type": "module",
@@ -11,6 +11,7 @@
 	"scripts": {
 		"start": "bun run src/cli.ts",
 		"build": "bun build --compile src/cli.ts --outfile itch-batch-downloader",
+		"build:all": "bun run scripts/build-release.ts",
 		"test": "bun test",
 		"typecheck": "bunx tsc --noEmit && bunx tsc --noEmit -p src/www/client",
 		"format": "bunx @biomejs/biome check --write",
